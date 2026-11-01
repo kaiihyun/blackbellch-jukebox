@@ -1,0 +1,37 @@
+:root{--panel:rgba(255,255,255,.04);--line:rgba(255,255,255,.14);--ink:#f2f0ff;--mute:#aaa6cc;--or:#ff8a1f;--field:#0b0a1c}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:14px/1.45 system-ui,"Segoe UI",sans-serif;background:linear-gradient(160deg,#050507 0%,#110e36 55%,#261b6b 100%) fixed;min-height:100vh}
+h1{font-size:20px;margin:0 0 .4rem}
+h2{font-size:13px;font-weight:600;color:var(--or);margin:1.1rem 0 .3rem}
+.app{display:grid;grid-template-columns:290px minmax(0,1fr) 310px;gap:12px;padding:12px;height:100vh}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;overflow:auto}
+label{display:block;margin-top:.55rem;color:var(--mute);font-size:12px}
+input,select,button{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:8px;padding:.35rem .5rem;margin:.2rem 0}
+select,input[type=text],input[type=url],input[type=number],input[type=file]{width:100%}
+input[type=checkbox]{margin-right:.4rem;accent-color:var(--or)}
+input[type=range]{width:100%;padding:0;accent-color:var(--or)}
+button{cursor:pointer;font-weight:600}
+button:disabled{opacity:.35;cursor:default}
+.load{width:100%;margin-top:1rem;background:var(--or);color:#07070a;border:0;padding:.55rem}
+.legend{border:1px solid var(--line);border-radius:8px;padding:.5rem;margin:.5rem 0}
+.legend button{width:100%}
+:focus-visible{outline:3px solid #ffd000;outline-offset:2px}
+.player{display:flex;flex-direction:column}
+.art{display:grid;grid-template-columns:2fr 1fr;gap:10px;align-items:start}
+figure{margin:0}
+figcaption{font-size:12px;color:var(--mute);margin-bottom:.3rem}
+video,canvas{width:100%;display:block;background:#000;border:1px solid var(--line);border-radius:8px}
+canvas{image-rendering:pixelated}
+.strip{height:24px;margin-bottom:.5rem}
+#now{color:var(--or);font-weight:600;margin:.8rem 0 .2rem}
+.ctl{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.ctl label{margin:0}
+.ctl select{width:auto}
+.ctl input[type=range]{width:9rem}
+.go{width:60px;height:60px;border-radius:50%;background:var(--or);color:#07070a;border:0;font-size:13px}
+.sec{padding:.45rem .9rem}
+#live{border-left:3px solid var(--or);background:var(--panel);border-radius:4px;padding:.5rem .7rem;margin-top:.8rem}
+table{border-collapse:collapse;width:100%}
+th,td{border-bottom:1px solid var(--line);padding:.35rem .2rem;text-align:left;vertical-align:top;font-size:13px}
+.sr{position:absolute;left:-9999px}
+@media(max-width:1000px){.app{grid-template-columns:1fr;height:auto}.col{overflow:visible}}

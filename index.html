@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earth Jukebox</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+<!-- ===== LEFT: configuration ===== -->
+<aside class="col" aria-label="Configuration">
+  <h1>Earth Jukebox</h1>
+  <h2>Source</h2>
+  <label for="preset">Preset (edit in config.js)</label>
+  <select id="preset"></select>
+  <label for="videoUrl">Video link (mp4)</label>
+  <input id="videoUrl" type="url" placeholder="https://... or assets/video.mp4">
+  <label for="file">Or a video file from this computer</label>
+  <input id="file" type="file" accept="video/*">
+
+  <h2>Legends</h2>
+  <div id="legendRows"></div>
+  <button id="addLegend" type="button">Add legend</button>
+
+  <h2>Listening</h2>
+  <label for="mode">Which latitude bands play</label>
+  <select id="mode"></select>
+  <label for="notes">Most notes per column</label>
+  <input id="notes" type="number" min="1" max="5">
+  <label><input id="invert" type="checkbox"> Flip pitch (north low, south high)</label>
+
+  <button id="load" type="button" class="load">Load video and legends</button>
+</aside>
+
+<!-- ===== MIDDLE: player ===== -->
+<main class="col player">
+  <div class="art">
+    <figure>
+      <figcaption>What the sound hears. Orange outline is where the sound is now.</figcaption>
+      <canvas id="map" role="img" aria-label="Grid of detected values, described in the table on the right"></canvas>
+    </figure>
+    <figure>
+      <figcaption>Source video</figcaption>
+      <video id="video" muted playsinline></video>
+    </figure>
+  </div>
+
+  <p id="now">Listening to: nothing yet</p>
+  <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek in video">
+
+  <div class="ctl">
+    <button id="key" type="button" class="sec">Sound key</button>
+    <button id="play" type="button" class="go" disabled>Play</button>
+    <button id="describe" type="button" class="sec">Describe</button>
+  </div>
+  <div class="ctl">
+    <label for="rate">Speed</label>
+    <select id="rate"><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select>
+    <label for="volume">Volume</label>
+    <input id="volume" type="range" min="0" max="1" step="0.05" value="0.7">
+  </div>
+  <div id="live" role="status" aria-live="polite">Not loaded yet.</div>
+</main>
+
+<!-- ===== RIGHT: info ===== -->
+<aside class="col" aria-label="Information">
+  <h2>How to listen</h2>
+  <p>Press Sound key first. Each frame sweeps once across the world, west (left ear) to east (right ear).</p>
+  <ul>
+    <li>Pitch is latitude. North is high, south is low.</li>
+    <li>Loudness is intensity. Silence means no data or dry.</li>
+    <li>Pluck is rain or temperature. Bell is snow.</li>
+    <li>In cycle mode, one latitude band plays per sweep.</li>
+  </ul>
+  <h2>Latest sweep</h2>
+  <p id="stats">Not analysed yet.</p>
+  <table>
+    <caption class="sr">Latest sweep, by latitude band</caption>
+    <thead><tr><th scope="col">Band</th><th scope="col">Status</th></tr></thead>
+    <tbody id="bandTable"></tbody>
+  </table>
+  <h2>Legends as decoded</h2>
+  <div id="legendView"></div>
+</aside>
+
+</div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
