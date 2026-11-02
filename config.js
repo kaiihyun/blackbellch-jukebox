@@ -49,6 +49,13 @@ window.CONFIG = {
   /* --- ACCESSIBILITY --- */
   announceEveryBeats: 4,    // screen reader summary every N sweeps
 
+  /* --- DETAILS PANEL: set a section to false to hide it while playing --- */
+  info: { now: true, stats: true, bands: true, legends: true },
+
+  /* --- LAST CARD: the upload slot --- */
+  upload: { name: "Upload your own", description: "Bring a video and its color-bar legend, then fill in the left panel.",
+            theme: { colors: ["#e5e5e5", "#737373", "#404040"], fixed: true }, videoUrl: "", legends: [] },
+
   /* --- PROXY --- */
   proxyPath: "/proxy?url=",
 
@@ -57,6 +64,8 @@ window.CONFIG = {
   presets: [
     {
       name: "IMERG precipitation",
+      description: "Rain and snow across the planet, every 30 minutes. Plucks are rain, bells are snow.",
+      theme: { colors: ["#38bdf8", "#6366f1", "#a855f7"], fixed: false },   // fixed: true keeps these instead of the legend colors
       videoUrl: "assets/precip.mp4",
       mapCrop: { x: 0, y: 0, w: 1, h: 1 },
       legends: [
@@ -68,6 +77,8 @@ window.CONFIG = {
     },
     {
       name: "Near-Surface Temperature",
+      description: "Temperature near the ground, from polar cold to desert heat. Louder means hotter.",
+      theme: { colors: ["#fb923c", "#ef4444", "#a855f7"], fixed: false },
       videoUrl: "assets/lst.mp4",
       mapCrop: { x: 0, y: 0, w: 1, h: 1 },
       wetMin: -1000,   // temperature has no "dry": every colored pixel makes sound

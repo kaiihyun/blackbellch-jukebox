@@ -2,90 +2,95 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Earth Jukebox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SPOT It For You</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="app">
+<div class="sky" aria-hidden="true"></div>
+<div class="glow" aria-hidden="true"></div>
 
-<!-- ===== LEFT: configuration ===== -->
-<aside class="col" aria-label="Configuration">
-  <h1>Earth Jukebox</h1>
-  <h2>Source</h2>
-  <label for="preset">Preset (edit in config.js)</label>
-  <select id="preset"></select>
-  <label for="videoUrl">Video link (mp4)</label>
-  <input id="videoUrl" type="url" placeholder="https://... or assets/video.mp4">
-  <label for="file">Or a video file from this computer</label>
-  <input id="file" type="file" accept="video/*">
+<!-- Title and preset name live in ONE block, so they always scale together -->
+<div id="top" class="top">
+  <header class="head">
+    <h1>SPOT It For You</h1>
+    <p class="tag">transforming data into music</p>
+    <h2 id="pTitle"></h2>
+  </header>
+  <section id="blurb" class="blurb" aria-label="Selected preset">
+    <p id="pDesc"></p>
+    <button id="start" type="button" class="btn pri big"><svg width="20" height="20" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 1.5v11l9-5.5z"/></svg> Play</button>
+    <p class="mono" id="pIdx"></p>
+  </section>
 
-  <h2>Legends</h2>
-  <div id="legendRows"></div>
-  <button id="addLegend" type="button">Add legend</button>
+  <!-- Only shown on the last card (Upload your own) -->
+  <section id="source" class="src glass" aria-label="Your own data">
+    <select id="preset" hidden></select>
+    <label for="videoUrl">Video link</label>
+    <input id="videoUrl" type="url" placeholder="assets/video.mp4">
+    <label for="file">Or a file</label>
+    <input id="file" type="file" accept="video/*">
+    <details><summary>Legends</summary><div id="legendRows"></div><button id="addLegend" type="button" class="btn">Add legend</button></details>
+    <button id="load" type="button" class="btn pri">Load</button>
+  </section>
+</div>
 
-  <h2>Listening</h2>
-  <label for="mode">Which latitude bands play</label>
-  <select id="mode"></select>
-  <label for="notes">Most notes per column</label>
-  <input id="notes" type="number" min="1" max="5">
-  <label><input id="invert" type="checkbox"> Flip pitch (north low, south high)</label>
+<button id="prev" type="button" class="arrow l" aria-label="Previous preset"><svg viewBox="0 0 40 120" aria-hidden="true"><polyline points="30,10 10,60 30,110"/></svg></button>
+<button id="next" type="button" class="arrow r" aria-label="Next preset"><svg viewBox="0 0 40 120" aria-hidden="true"><polyline points="10,10 30,60 10,110"/></svg></button>
 
-  <button id="load" type="button" class="load">Load video and legends</button>
-</aside>
 
-<!-- ===== MIDDLE: player ===== -->
-<main class="col player">
-  <div class="art">
-    <figure>
-      <figcaption>What the sound hears. Orange outline is where the sound is now.</figcaption>
-      <canvas id="map" role="img" aria-label="Grid of detected values, described in the table on the right"></canvas>
-    </figure>
-    <figure>
-      <figcaption>Source video</figcaption>
-      <video id="video" muted playsinline></video>
-    </figure>
+<!-- Desktop: .panel is invisible to layout (display: contents), children sit at the sides.
+     Phone: .panel is the one scrolling area under the frozen title. -->
+<div id="panel" class="panel">
+
+  <section class="stage" aria-label="Player">
+    <div class="art">
+      <figure><figcaption class="mono">What the sound hears</figcaption>
+        <canvas id="map" role="img" aria-label="Grid of detected values, described in the information card"></canvas></figure>
+      <figure><figcaption class="mono">Source</figcaption>
+        <div class="vwrap"><video id="video" muted playsinline></video>
+          <div id="vtop" class="ov dim"></div><div id="vbot" class="ov dim"></div><div id="vcol" class="ov"></div></div></figure>
+    </div>
+    <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek in video">
+    <div class="ctl">
+      <button id="back" type="button" class="btn" aria-label="Back to the menu">&larr; Back</button>
+      <button id="key" type="button" class="btn">Sound key</button>
+      <button id="play" type="button" class="btn pri" disabled><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 1.5v11l9-5.5z"/></svg> Play</button>
+      <button id="describe" type="button" class="btn">Describe</button>
+    </div>
+  </section>
+
+  <!-- Phone only: visible copy of the status text, scrolls with the page -->
+  <p id="liveVis" class="mono" aria-hidden="true"></p>
+
+  <!-- Left: settings (slides away while music plays) -->
+  <aside id="config" class="side slide glass" aria-label="Settings">
+    <h3 class="mono">Settings</h3>
+    <label for="mode">Bands</label><select id="mode"></select>
+    <label for="rate">Speed</label><select id="rate"><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select>
+    <label for="volume">Volume</label><input id="volume" type="range" min="0" max="1" step="0.05" value="0.7">
+    <label for="notes">Most notes per column</label><input id="notes" type="number" min="1" max="5">
+    <label class="check"><input id="invert" type="checkbox"> Flip pitch</label>
+  </aside>
+
+  <!-- Right: legend first, then information (slides away while music plays) -->
+  <div class="side rcol slide">
+    <aside id="info-legends" class="glass card" aria-label="Legend"><h3 class="mono">Legend</h3><div id="legendView"></div></aside>
+    <aside id="info" class="glass card" aria-label="Information">
+      <section id="info-now"><h3 class="mono">Now</h3><p id="now">Nothing yet</p></section>
+      <section id="info-stats"><h3 class="mono">This sweep</h3><p id="stats">Not analysed yet.</p></section>
+      <section id="info-bands"><h3 class="mono">Bands</h3>
+        <table><caption class="sr">Latest sweep, by latitude band</caption><tbody id="bandTable"></tbody></table></section>
+    </aside>
   </div>
-
-  <p id="now">Listening to: nothing yet</p>
-  <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek in video">
-
-  <div class="ctl">
-    <button id="key" type="button" class="sec">Sound key</button>
-    <button id="play" type="button" class="go" disabled>Play</button>
-    <button id="describe" type="button" class="sec">Describe</button>
-  </div>
-  <div class="ctl">
-    <label for="rate">Speed</label>
-    <select id="rate"><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select>
-    <label for="volume">Volume</label>
-    <input id="volume" type="range" min="0" max="1" step="0.05" value="0.7">
-  </div>
-  <div id="live" role="status" aria-live="polite">Not loaded yet.</div>
-</main>
-
-<!-- ===== RIGHT: info ===== -->
-<aside class="col" aria-label="Information">
-  <h2>How to listen</h2>
-  <p>Press Sound key first. Each frame sweeps once across the world, west (left ear) to east (right ear).</p>
-  <ul>
-    <li>Pitch is latitude. North is high, south is low.</li>
-    <li>Loudness is intensity. Silence means no data or dry.</li>
-    <li>Pluck is rain or temperature. Bell is snow.</li>
-    <li>In cycle mode, one latitude band plays per sweep.</li>
-  </ul>
-  <h2>Latest sweep</h2>
-  <p id="stats">Not analysed yet.</p>
-  <table>
-    <caption class="sr">Latest sweep, by latitude band</caption>
-    <thead><tr><th scope="col">Band</th><th scope="col">Status</th></tr></thead>
-    <tbody id="bandTable"></tbody>
-  </table>
-  <h2>Legends as decoded</h2>
-  <div id="legendView"></div>
-</aside>
 
 </div>
+
+<div class="disc" aria-hidden="true"><div class="spin"><span class="label"></span></div></div>
+<div id="live" role="status" aria-live="polite">Not loaded yet.</div>
+
 <script src="config.js"></script>
 <script src="app.js"></script>
 </body>
