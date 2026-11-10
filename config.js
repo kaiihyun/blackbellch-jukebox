@@ -38,8 +38,8 @@ window.CONFIG = {
   analysis: {
     width: 720,
     samplesPerTile: 6,
-    maxColorDistance: 40,   // raise to 60 if too few tiles light up
-    minCoverage: 0.15,
+    maxColorDistance: 70,   // raise if too few tiles light up, lower if wrong colors sneak in
+    minCoverage: 0.06,
     wetMin: 0.1,
     dryColor: null,
     dryTolerance: 30,
@@ -63,15 +63,13 @@ window.CONFIG = {
      Put the downloaded files in an assets folder next to index.html. */
   presets: [
     {
-      name: "IMERG precipitation",
-      description: "Rain and snow across the planet, every 30 minutes. Plucks are rain, bells are snow.",
+      name: "IMERG rain",
+      description: "Rain across the planet, every 30 minutes. Louder and higher means heavier rain.",
       theme: { colors: ["#38bdf8", "#6366f1", "#a855f7"], fixed: false },   // fixed: true keeps these instead of the legend colors
       videoUrl: "assets/precip.mp4",
       mapCrop: { x: 0, y: 0, w: 1, h: 1 },
       legends: [
         { label: "Liquid precipitation", type: "liquid", url: "assets/rainlegend.png", min: 0.1, max: 50, scale: "log",
-          orientation: "horizontal-lowleft", crop: { x: 0, y: 0, w: 1, h: 1 } },
-        { label: "Frozen precipitation", type: "frozen", url: "assets/snowlegend.png", min: 0.1, max: 50, scale: "log",
           orientation: "horizontal-lowleft", crop: { x: 0, y: 0, w: 1, h: 1 } }
       ]
     },
@@ -84,6 +82,18 @@ window.CONFIG = {
       wetMin: -1000,   // temperature has no "dry": every colored pixel makes sound
       legends: [
         { label: "Temperature in Celsius", type: "temperature", url: "assets/lstlegend.png", min: -40, max: 40, scale: "linear",
+          orientation: "horizontal-lowleft", crop: { x: 0, y: 0, w: 1, h: 1 } }
+      ]
+    },
+    {
+      name: "Sea Surface Temperature (SST)",
+      description: "Dfor the past two and half years",
+      theme: { colors: ["#fb923c", "#ef4444", "#2f42e8"], fixed: false },
+      videoUrl: "assets/asst.mp4",
+      mapCrop: { x: 0, y: 0, w: 1, h: 1 },
+      wetMin: -1000,   // temperature has no "dry": every colored pixel makes sound
+      legends: [
+        { label: "Temperature in Celsius", type: "temperature", url: "assets/seatemplegend.png", min: -5, max: 35, scale: "linear",
           orientation: "horizontal-lowleft", crop: { x: 0, y: 0, w: 1, h: 1 } }
       ]
     }

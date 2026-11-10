@@ -94,6 +94,11 @@ async function decodeLegend(spec) {
     var value = spec.scale === "log" ? spec.min * Math.pow(spec.max / spec.min, t) : spec.min + (spec.max - spec.min) * t;
     entries.push({ r: d[p], g: d[p + 1], b: d[p + 2], t: t, value: value });
   }
+  /* A sample that looks nothing like BOTH its neighbours is a separator line or border, not a color. Drop it. */
+  entries = entries.filter(function (e, i) {
+    var a = entries[i - 1], b = entries[i + 1], far = function (o) { return !o || dist2(e.r, e.g, e.b, [o.r, o.g, o.b]) > 2500; };
+    return !(far(a) && far(b));
+  });
   if (!entries.length) throw new Error("No color found in legend: " + spec.label);
   return { spec: spec, entries: entries, src: im.src };
 }
@@ -117,7 +122,7 @@ function legendOverlap() {
   for (var i = 1; i < S.legends.length; i++) for (var j = 0; j < i; j++) {
     var a = S.legends[j].entries, n = 0, b = S.legends[i].entries;
     b.forEach(function (e) { for (var k = 0; k < a.length; k++) if (dist2(e.r, e.g, e.b, [a[k].r, a[k].g, a[k].b]) < 225) { n++; break; } });
-    if (n / b.length > 0.3) out.push("Warning: " + Math.round(n / b.length * 100) + " percent of the colors in " + S.legends[i].spec.label + " are almost the same as " + S.legends[j].spec.label + ", so those pixels cannot be told apart and count as " + S.legends[i].spec.label + ".");
+    if (n / b.length > 0.3) out.push("Warning: " + Math.round(n / b.length * 100) + " percent of the colors in " + S.legends[i].spec.label + " are almost the same as " + S.legends[j].spec.label + ", so those pixels cannot be told apart and count as " + S.legends[j].spec.label + ".");
   }
   return out.join(" ");
 }
@@ -146,15 +151,18 @@ async function loadVideo(url, isLocal) {
 
 /* ===== REGION 5: FRAME ANALYSIS (pixels -> grid of tiles) =====
    Tile value: null = no data, 0 = dry, number = rain/snow rate from the legend. */
+/* Legends are checked in order. The FIRST legend that has a color within tolerance wins, so put the most
+   important one (rain) first. Later legends (snow) only get pixels that the earlier ones cannot explain. */
 function matchColor(r, g, b) {
-  var best = null, bd = A.maxColorDistance * A.maxColorDistance;
-  S.legends.forEach(function (L) {
-    L.entries.forEach(function (e) {
-      var d = dist2(r, g, b, [e.r, e.g, e.b]);
-      if (d <= bd) { bd = d; best = { e: e, type: L.spec.type }; }
-    });
-  });
-  return best;
+  for (var i = 0; i < S.legends.length; i++) {
+    var L = S.legends[i], tol = L.spec.tolerance || A.maxColorDistance, bd = tol * tol, best = null;
+    for (var k = 0; k < L.entries.length; k++) {
+      var e = L.entries[k], d = dist2(r, g, b, [e.r, e.g, e.b]);
+      if (d <= bd) { bd = d; best = e; }
+    }
+    if (best) return { e: best, type: L.spec.type };
+  }
+  return null;
 }
 function prepAnalysis() {
   var v = S.video, cr = S.crop;
@@ -166,6 +174,7 @@ function prepAnalysis() {
 function analyze() {
   var v = S.video, cr = S.crop, cols = C.grid.cols, rows = C.grid.rows, n = A.samplesPerTile;
   S.ax.drawImage(v, cr.x * v.videoWidth, cr.y * v.videoHeight, cr.w * v.videoWidth, cr.h * v.videoHeight, 0, 0, S.aw, S.ah);
+  S.unm = {};
   var d = S.ax.getImageData(0, 0, S.aw, S.ah).data, tw = S.aw / cols, th = S.ah / rows, tiles = [];
   for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) {
     var wet = 0, dry = 0, sv = 0, st = 0, sr = 0, sg = 0, sb = 0, types = {};
@@ -176,7 +185,7 @@ function analyze() {
       if (A.noDataColor && dist2(R, G, B, A.noDataColor) < A.dryTolerance * A.dryTolerance) continue;
       if (A.dryColor && dist2(R, G, B, A.dryColor) < A.dryTolerance * A.dryTolerance) { dry++; continue; }
       var m = matchColor(R, G, B);
-      if (!m) continue;
+      if (!m) { if (Math.max(R, G, B) > 60) { var q = (R >> 4 << 4) + "," + (G >> 4 << 4) + "," + (B >> 4 << 4); S.unm[q] = (S.unm[q] || 0) + 1; } continue; }
       if (m.e.value < S.wetMin) { dry++; continue; }
       wet++; sv += m.e.value; st += m.e.t; sr += m.e.r; sg += m.e.g; sb += m.e.b;
       types[m.type] = (types[m.type] || 0) + 1;
@@ -414,6 +423,26 @@ function setTheme(c) {
   c = c || ["#38bdf8", "#6366f1", "#a855f7"]; S.accent = c[0];
   var r = document.documentElement.style; r.setProperty("--a", c[0]); r.setProperty("--b", c[1]); r.setProperty("--c", c[2]);
 }
+
+function layoutFlow() {
+  var cs = document.querySelectorAll(".cf"), n = cs.length;
+  if (!n) return;
+  var w = cs[0].offsetWidth;
+  cs.forEach(function (el, i) {
+    var d = ((i - S.idx) % n + n) % n; if (d > n / 2) d -= n;   // shortest way around the loop
+    var a = Math.abs(d), s = Math.sign(d);
+    el.style.transform = d === 0
+      ? "translateX(0) translateZ(60px) scale(1.1)"
+      : "translateX(" + (s * (w * 0.75 + (a - 1) * w * 0.4)) + "px) translateZ(" + (-a * 80) + "px) rotateY(" + (-s * 40) + "deg) scale(.9)";
+    el.style.zIndex = 10 - a;
+    el.style.opacity = a > 2 ? 0 : 1 - 0.25 * a;
+    el.style.pointerEvents = a > 2 ? "none" : "auto";
+    el.classList.toggle("on", d === 0);
+    el.setAttribute("aria-current", d === 0 ? "true" : "false");
+  });
+}
+
+
 function showItem(i, now) {
   var p = ITEMS[i], b = $("top"); S.idx = i; $("preset").value = i; document.body.classList.toggle("upload", i === ITEMS.length - 1);
   stop(); applyPreset(i); S.loaded = false; $("play").disabled = true;
@@ -421,6 +450,7 @@ function showItem(i, now) {
   if (now) text(); else { b.classList.add("swap"); setTimeout(text, 250); }
   setTheme(p.theme && p.theme.colors);
   say(p.name + ". Press the Play button or Enter to start. Swipe or use the arrow buttons to change.");
+  layoutFlow();
 }
 function resetPlayback(msg) {
   stop(); S.video.currentTime = 0; S.beat = 0; S.tiles = null; S.active = null; $("seek").value = 0;
@@ -472,6 +502,29 @@ async function onLoad() {
 (function wire() {
   ITEMS.forEach(function (p, i) { var o = document.createElement("option"); o.value = i; o.textContent = p.name; $("preset").appendChild(o); });
   $("preset").addEventListener("change", function () { showItem(+this.value); });
+
+
+  var fl = $("flow");
+ITEMS.forEach(function (p, i) {
+  var c = (p.theme && p.theme.colors) || ["#38bdf8", "#6366f1", "#a855f7"];
+  var b = document.createElement("button"); b.type = "button"; b.className = "cf";
+  b.style.setProperty("--c1", c[0]); b.style.setProperty("--c2", c[1]); b.style.setProperty("--c3", c[2]);
+  b.setAttribute("aria-label", p.name + ", " + (i + 1) + " of " + ITEMS.length);
+  b.innerHTML = '<span class="cover"></span><span class="lab"><strong></strong><small></small></span>';
+  b.querySelector("strong").textContent = p.name;
+  b.querySelector("small").textContent = (i + 1) + " / " + ITEMS.length;
+  b.addEventListener("click", function () { if (S.view === "menu") showItem(i); });
+  fl.appendChild(b);
+});
+var wheelT = 0;   // mouse wheel / trackpad scroll moves through the cards
+fl.addEventListener("wheel", function (e) {
+  if (S.view !== "menu") return;
+  e.preventDefault();
+  var now = Date.now(); if (now - wheelT < 350) return; wheelT = now;
+  var d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  showItem((S.idx + (d > 0 ? 1 : -1) + ITEMS.length) % ITEMS.length);
+}, { passive: false });
+window.addEventListener("resize", layoutFlow);
   showItem(0, true);
   function go(d) { if (S.view === "menu") showItem((S.idx + d + ITEMS.length) % ITEMS.length); }
   $("prev").addEventListener("click", function () { go(-1); });

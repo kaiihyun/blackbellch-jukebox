@@ -171,3 +171,33 @@ canvas{image-rendering:pixelated}
   #key{justify-self:end}#describe{justify-self:start}
   #play{height:56px;min-width:120px}
 }
+
+
+/* ===== COVERFLOW MENU ===== */
+:root{--title-size:clamp(34px,min(8vw,11vh),100px)}
+body:not(.playing) .top{top:max(18px,4vh);transform:none}
+body.upload:not(.playing) .top{top:50%;transform:translateY(-50%)}   /* upload form stays centered */
+
+.flow{position:fixed;left:0;right:0;bottom:6vh;height:190px;z-index:3;perspective:1100px;pointer-events:none;
+  transition:opacity .5s,transform var(--slide) var(--ease),visibility 0s}
+.playing .flow,body.upload:not(.playing) .flow{opacity:0;visibility:hidden;transform:translateY(40px)}
+
+.cf{position:absolute;left:50%;top:0;width:150px;height:180px;margin-left:-75px;padding:8px;
+  display:flex;flex-direction:column;text-align:left;color:#fff;cursor:pointer;pointer-events:auto;
+  background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid rgba(255,255,255,.14);border-radius:16px;
+  transition:transform .7s var(--ease),opacity .5s,border-color .3s,box-shadow .3s}
+.cf:hover{background:var(--glass)}
+.cf .cover{display:block;flex:1;border-radius:10px;
+  background:radial-gradient(circle at 30% 25%,rgba(255,255,255,.35),transparent 45%),
+             conic-gradient(from 200deg,var(--c1),var(--c2),var(--c3),var(--c1))}
+.cf .lab{display:block;padding:8px 2px 0}
+.cf strong{display:block;font-size:13px;font-weight:600;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cf small{display:block;font:11px var(--mono);color:var(--mute)}
+.cf.on{border-color:var(--a);box-shadow:0 20px 60px -10px color-mix(in srgb,var(--a) 50%,transparent)}
+
+@media (max-width:760px){
+  .flow{bottom:16vw;height:150px}
+  .cf{width:120px;height:145px;margin-left:-60px}
+}
