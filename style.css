@@ -1,0 +1,73 @@
+/* ---------- Colors: light theme by default, dark theme follows the device ---------- */
+:root{--bg:#eef1f6;--ink:#141a2b;--mut:#566079;--panel:#fff;--line:#cfd6e5;--acc:#5b3fd1;--on:#fff;--hot:#e5482a;--wet:#1f8bf0;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f1e;--ink:#e7ebf7;--mut:#98a2c2;--panel:#151b31;--line:#29324f;--acc:#a99bff;--on:#120c33;--hot:#ff6a45;--wet:#4aa8ff;color-scheme:dark}}
+
+/* ---------- Page basics ---------- */
+html{background:var(--bg)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Avenir Next","Segoe UI",system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 40px}
+h1{font-size:clamp(2rem,6vw,3.2rem);line-height:1.05;margin:0 0 8px;letter-spacing:-.025em}
+h2{font-size:1.1rem;margin:28px 0 8px}
+.lead{max-width:64ch;color:var(--mut);margin:0 0 18px}
+
+/* ---------- Scene buttons and general controls ---------- */
+.scenes{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+button,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+.scenes button[aria-pressed="true"]{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);font-weight:600} /* selected scene */
+button.go{background:var(--acc);border-color:var(--acc);color:var(--on);font-weight:600}                          /* Play button */
+input[type=range]{width:100%;accent-color:var(--acc)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input[type=file]{display:none} /* the real file input is hidden; the "Load" button opens it */
+
+/* ---------- Picture + meter ---------- */
+.stage{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(0,1fr);gap:14px;align-items:start} /* source gets ~2/3 of the width, pixel grid ~1/3 */
+.pane{margin:0}
+.pane figcaption{font-size:.875rem;color:var(--mut);margin-top:6px}
+.pixrow{display:grid;grid-template-columns:1fr 36px;gap:8px}
+.pixbox{position:relative;aspect-ratio:2/1;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:#0c1020}
+.pixbox canvas{display:block;width:100%;height:100%;image-rendering:pixelated} /* pixelated = hard-edged squares, no blur */
+@media (max-width:700px){.stage{grid-template-columns:1fr}.pane+.pane{width:70%}} /* phones: stack, grid still smaller than the source */
+.view{position:relative;aspect-ratio:2/1;background:#0c1020;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.view canvas{display:block;width:100%;height:100%}
+.view.drop{outline:3px dashed var(--acc);outline-offset:-6px} /* shown while dragging a file over the picture */
+.ph{position:absolute;top:0;bottom:0;left:0;width:2px;background:#fff;box-shadow:0 0 12px 3px rgba(255,255,255,.8);display:none} /* sweep line */
+.sel{display:none;position:absolute;border:2px solid #fff;box-shadow:0 0 0 999px rgba(0,0,0,.5);pointer-events:none;left:30%;top:25%;width:40%;height:50%} /* chosen area; the big shadow dims everything outside it */
+.view.area{cursor:crosshair;touch-action:none}
+.view.area .sel{display:block} /* only visible in area mode */
+.mwrap{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mwrap canvas{position:absolute;inset:0;width:100%;height:100%}
+
+/* ---------- Readout, captions, control panel ---------- */
+.read{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 0;font-variant-numeric:tabular-nums}
+.read b{font-weight:600}
+.read .h{color:var(--hot)}.read .w{color:var(--wet)}
+.cap{font-size:.875rem;color:var(--mut);margin:6px 0 0}
+.panel{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;align-items:end}
+.f{display:flex;flex-direction:column;gap:6px;min-width:0}
+.f>label,.f>span{font-size:.875rem;color:var(--mut)}
+
+/* ---------- "How the sound is made" list ---------- */
+dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0;max-width:72ch}
+dt{font-weight:600}dd{margin:0;color:var(--mut)}
+@media (max-width:560px){dl{grid-template-columns:1fr}dd{margin-bottom:6px}}
+
+/* ---------- Temperature legend strip ---------- */
+.legend{margin-top:12px;max-width:520px}
+.legendbar{height:14px;border-radius:7px;border:1px solid var(--line)}
+.legendticks{display:flex;justify-content:space-between;font-size:.75rem;color:var(--mut);font-variant-numeric:tabular-nums;margin-top:2px}
+
+/* ---------- Main menu ---------- */
+#menu{padding-top:4px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:18px}
+.card{display:flex;flex-direction:column;align-items:stretch;gap:8px;text-align:left;background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;font:inherit;color:var(--ink)}
+.card:hover{border-color:var(--acc)}
+.cardbar{display:block;height:14px;border-radius:7px}
+.cardname{font-weight:700;font-size:1.05rem}
+.cardblurb{color:var(--mut);font-size:.875rem;line-height:1.4}
+
+/* ---------- App header (shown once a map type is chosen) ---------- */
+.apphead{display:flex;align-items:center;gap:14px;margin-bottom:4px}
+.apphead h1{font-size:clamp(1.5rem,4vw,2.2rem);margin:0}
+#menuBtn{flex:none}
