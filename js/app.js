@@ -19,7 +19,6 @@
   var src = null;                               // the loaded image or video, or null if nothing is loaded yet
   var objUrl = null;                            // temporary URL of a loaded file
   var region = { x: 0.3, y: 0.25, w: 0.4, h: 0.5 }; // chosen area as fractions (0..1) of the picture
-  var t0 = 0;                                   // time when Play was pressed (for the sweep position)
   var frameCount = 0;
   var vb = $('viewBox');
   function isArea() { return $('mode').value === 'area'; }
@@ -52,9 +51,8 @@
 
     // Where are we listening? Area mode: the box centre. Sweep mode: a position moving 0→1 and looping.
     var area = isArea(), playing = EJ.audio.playing;
-    var pos = area ? region.x + region.w / 2
-                   : (playing ? (((ts - t0) / 1000 / parseFloat($('dur').value)) % 1) : 0);
-    EJ.columnLevels(area, Math.min(C - 1, Math.floor(pos * C)));
+    var pos = area ? region.x + region.w / 2 : EJ.sweep.position(ts, playing); // sweeping.js
+    EJ.columnLevels(area, EJ.sweep.column(pos));
 
     // ---- NOTE and SCENE layer gating ----
     // Keep the true, un-muted amounts for the readout (so the numbers always reflect the real
@@ -70,10 +68,7 @@
     if (playing) EJ.audio.update(pos);
 
     // Show the sweep line (sweep mode only), on both the source picture and the pixel grid.
-    var on = playing && !area;
-    $('ph').style.display = on ? 'block' : 'none';
-    $('ph2').style.display = on ? 'block' : 'none';
-    if (on) { $('ph').style.left = $('ph2').style.left = (pos * 100) + '%'; }
+    EJ.sweep.showLine(playing && !area, pos);
 
     // Bar meter: warm bar = pad amount in that row, blue bar = drops amount in that row (post-gating,
     // so a muted layer visibly goes flat here too).
@@ -85,6 +80,8 @@
         mctx.fillStyle = 'rgb(74,168,255)'; mctx.fillRect(29, r * rh + 1, EJ.rowRain[r] * 26, rh - 2);
       }
     }
+
+    EJ.spectrum.draw(playing); // the "Sounds playing now" panel (spectrum.js)
 
     // Update the text readout every 6th frame (no need to do it more often). Uses the RAW amounts,
     // so it always shows the true picture data even while a layer is muted.
@@ -227,8 +224,6 @@
   $('mode').onchange = function () {
     var a = isArea();
     vb.classList.toggle('area', a);      // shows the box and the crosshair cursor
-    $('dur').disabled = a;               // sweep time doesn't apply to area mode
-    t0 = performance.now();
     vb.tabIndex = a ? 0 : -1;
     vb.setAttribute('aria-label', a ? 'Listening area. Arrow keys move the box; Shift plus arrows resize it.' : 'Source picture');
     $('pixCap').textContent = a ? 'What the app hears: only the chosen area, stretched onto a 64 × 14 grid. Each row is a note.'
@@ -238,7 +233,7 @@
   $('play').onclick = function () {
     var b = $('play');
     if (!EJ.audio.playing) {
-      t0 = performance.now();
+      EJ.sweep.restart();
       EJ.audio.start(parseFloat($('vol').value)); // must happen inside a click, or browsers block audio
       b.textContent = 'Stop'; b.setAttribute('aria-pressed', 'true');
     } else {
@@ -248,7 +243,6 @@
     updateStatus();
   };
   $('vol').oninput = function () { EJ.audio.setVolume(parseFloat($('vol').value)); };
-  $('dur').oninput = function () { $('durO').textContent = $('dur').value + ' s'; t0 = performance.now(); };
 
   // ---------- Map type: applies one entry from EJ.MAPS (maps.js, or a custom upload) to the page ----------
   function applyMapType(id) {
@@ -350,7 +344,8 @@
   };
 
   // Exposed so legend-upload.js can add a new map type on the fly and jump straight to it.
-  EJ.ui = { refreshMenu: buildMenu, open: openApp, updateStatus: updateStatus };
+  EJ.ui = { refreshMenu: buildMenu, open: openApp, updateStatus: updateStatus,
+           syncToggles: function () { buildToggles(); updateStatus(); } }; // re-read EJ.layers after a mute button changes it
 
   buildToggles();
   buildMenu();

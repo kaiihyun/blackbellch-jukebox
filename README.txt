@@ -15,7 +15,9 @@ Project layout
   js/maps.js                map types: sound voice, major/minor scale, tempo
   js/legend-upload.js       turn an uploaded colour-bar image into a new map type
   js/analysis.js            pixels to numbers, plus the text scene description
+  js/sweeping.js            the sweep listening mode: moving line, columns, pan
   js/audio.js               Web Audio sound engine
+  js/spectrum.js            live spectrum bar + mute button for each playing layer
   js/app.js                 menu, controls, uploads, keyboard shortcuts, main loop
   js/scenes.js              demo scenes (not loaded by index.html)
 

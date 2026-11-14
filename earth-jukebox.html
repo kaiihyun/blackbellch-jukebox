@@ -105,6 +105,17 @@ button{min-height:44px} /* comfortable touch and switch targets */
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 @media (forced-colors:active){.ph,.sel{border:2px solid CanvasText}}
 
+/* ---------- Sounds playing now (spectrum panel) ---------- */
+.spectrum{margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.spechead{display:flex;justify-content:space-between;gap:8px;font-size:.875rem;color:var(--mut);margin-bottom:4px}
+.srow{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:10px;align-items:center;padding:3px 0}
+.slabel{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.slabel small{color:var(--mut);font-size:.72rem}
+.srow canvas{display:block;width:100%;height:32px}
+.srow.off .slabel{opacity:.55}
+.smute{min-width:76px}
+.smute[aria-pressed="true"]{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);font-weight:600}
+
 </style>
 </head>
 <body>
@@ -136,6 +147,10 @@ button{min-height:44px} /* comfortable touch and switch targets */
         <div class="sel" id="sel"></div> <!-- chosen-area box -->
       </div>
       <figcaption>Source: load your own picture or video below. The sound comes from the area under the white line or box.</figcaption>
+      <div class="spectrum" id="spectrum">
+        <div class="spechead"><span>Sounds playing now</span><span id="specHint">Press Play to see them move.</span></div>
+        <div id="specRows"></div>
+      </div>
     </figure>
     <figure class="pane">
       <div class="pixrow">
@@ -703,8 +718,9 @@ EJ.layers = { notesWarm: true, notesCold: true, pad: true, drops: true, noise: t
 
   // Pick the pad and drops amounts for each ROW (= each note).
   //  area mode  → use the whole grid (which already holds only the chosen area)
-  //  sweep mode → use just the 3 columns under the sweep line (col-1, col, col+1)
+  //  sweep mode → handled by EJ.sweep.levels() in sweeping.js
   EJ.columnLevels = function (area, col) {
+    if (!area) { EJ.sweep.levels(col); return; } // sweep mode lives in sweeping.js
     for (var r = 0; r < R; r++) {
       var a = 0, b = 0, n = 0, c;
       if (area) {
@@ -718,10 +734,6 @@ EJ.layers = { notesWarm: true, notesCold: true, pad: true, drops: true, noise: t
         // Blend of the average and the strongest cell, so small hot spots still get heard.
         EJ.rowHeat[r] = 0.5 * (a / C + ma);
         EJ.rowRain[r] = 0.5 * (b / C + mb);
-      } else {
-        for (c = Math.max(0, col - 1); c <= Math.min(C - 1, col + 1); c++) { a += EJ.HH[r * C + c]; b += EJ.WW[r * C + c]; n++; }
-        EJ.rowHeat[r] = a / n;
-        EJ.rowRain[r] = b / n;
       }
     }
   };
@@ -750,6 +762,64 @@ EJ.layers = { notesWarm: true, notesCold: true, pad: true, drops: true, noise: t
 
 </script>
 <script>
+// sweeping.js — everything for the "Sweep across the frame" listening mode, in one place.
+// A line travels west to east and loops. The sound comes from the 3 grid columns under it, panned
+// left to right. (The other mode, "Listen to a chosen area", lives in app.js and analysis.js.)
+//   EJ.sweep.restart()       start the sweep again from the left (Play, mode change, slider change)
+//   EJ.sweep.position(ts,on) where the line is, 0..1 (0 when not playing). ts = frame time in ms
+//   EJ.sweep.column(pos)     which grid column that position is over
+//   EJ.sweep.levels(col)     pad and drops amount for each ROW from the 3 columns under the line
+//   EJ.sweep.pan(pos)        stereo pan for that position, -0.8 (left) to +0.8 (right)
+//   EJ.sweep.showLine(on,p)  show/move the white line on the picture and on the pixel grid
+(function () {
+  var C = EJ.C, R = EJ.R;
+  function $(id) { return document.getElementById(id); }
+  var t0 = 0; // time when the sweep last started
+
+  EJ.sweep = {
+    restart: function () { t0 = performance.now(); },
+
+    // One full pass takes the "Sweep time" slider's number of seconds, then it loops.
+    position: function (ts, playing) {
+      return playing ? (((ts - t0) / 1000 / parseFloat($('dur').value)) % 1) : 0;
+    },
+
+    column: function (pos) { return Math.min(C - 1, Math.floor(pos * C)); },
+
+    // Average the 3 columns under the line (col-1, col, col+1) for every row.
+    levels: function (col) {
+      for (var r = 0; r < R; r++) {
+        var a = 0, b = 0, n = 0;
+        for (var c = Math.max(0, col - 1); c <= Math.min(C - 1, col + 1); c++) {
+          a += EJ.HH[r * C + c]; b += EJ.WW[r * C + c]; n++;
+        }
+        EJ.rowHeat[r] = a / n;
+        EJ.rowRain[r] = b / n;
+      }
+    },
+
+    pan: function (pos) { return pos * 1.6 - 0.8; },
+
+    showLine: function (on, pos) {
+      $('ph').style.display = on ? 'block' : 'none';
+      $('ph2').style.display = on ? 'block' : 'none';
+      if (on) $('ph').style.left = $('ph2').style.left = (pos * 100) + '%';
+    }
+  };
+
+  // Sweep-time slider: update its label and restart the sweep. It does nothing in area mode.
+  $('dur').addEventListener('input', function () {
+    $('durO').textContent = $('dur').value + ' s';
+    EJ.sweep.restart();
+  });
+  $('mode').addEventListener('change', function () {
+    $('dur').disabled = $('mode').value === 'area';
+    EJ.sweep.restart();
+  });
+})();
+
+</script>
+<script>
 // audio.js — the sound engine (Web Audio API). Nothing here touches the picture.
 // It reads EJ.map().voice (maps.js) for every setting, so each map type can sound different
 // without this file needing to know which map type is selected.
@@ -767,7 +837,8 @@ EJ.layers = { notesWarm: true, notesCold: true, pad: true, drops: true, noise: t
 EJ.audio = (function () {
   var R = EJ.R;
   var ac = null;                       // the AudioContext (created on first Play; browsers need a click first)
-  var master, pan, revSend, lowpass, noiseGain;
+  var master, pan, revSend, lowpass, noiseGain, dropBus;
+  var taps = {};                       // one analyser per layer, for the spectrum panel (spectrum.js)
   var voices = [];                     // one pad voice per row
   var drones = [];                     // the quiet drone oscillators' gain nodes (toggled by EJ.layers.drone)
   var nextTime = 0;                    // when the next drop step is due
@@ -782,6 +853,15 @@ EJ.audio = (function () {
   function noteFreq(i, base, scale) {
     var midi = base + Math.floor(i / 5) * 12 + SCALES[scale || 'major'][i % 5];
     return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  // Analyser for one layer. It only listens (it is a branch off the signal), so it never changes the sound.
+  function tap(key) {
+    if (!taps[key]) {
+      var an = ac.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.75; an.minDecibels = -90; an.maxDecibels = -20;
+      taps[key] = { an: an, buf: new Uint8Array(an.frequencyBinCount) };
+    }
+    return taps[key].an;
   }
 
   // Create every audio node once, the first time the user presses Play.
@@ -811,6 +891,9 @@ EJ.audio = (function () {
     lowpass.type = 'lowpass'; lowpass.Q.value = 2; lowpass.frequency.value = 300;
     var padVerb = ac.createGain(); padVerb.gain.value = 0.25;
     lowpass.connect(master); lowpass.connect(padVerb); padVerb.connect(revSend);
+    lowpass.connect(tap('pad'));
+    // Every drop goes through one bus, so the Drops layer can be metered as a whole.
+    dropBus = ac.createGain(); dropBus.connect(master); dropBus.connect(revSend); dropBus.connect(tap('drops'));
 
     for (var r = 0; r < R; r++) {
       var g = ac.createGain(); g.gain.value = 0; g.connect(lowpass); // silent until the pad amount rises
@@ -826,7 +909,7 @@ EJ.audio = (function () {
     [55, 82.41].forEach(function (f) {
       var o = ac.createOscillator(), g = ac.createGain();
       o.frequency.value = f; g.gain.value = 0;
-      o.connect(g); g.connect(master); o.start();
+      o.connect(g); g.connect(master); g.connect(tap('drone')); o.start();
       drones.push(g);
     });
 
@@ -836,7 +919,7 @@ EJ.audio = (function () {
     var ns = ac.createBufferSource(); ns.buffer = nb; ns.loop = true;
     var bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3500; bp.Q.value = 0.6;
     noiseGain = ac.createGain(); noiseGain.gain.value = 0;
-    ns.connect(bp); bp.connect(noiseGain); noiseGain.connect(master); ns.start();
+    ns.connect(bp); bp.connect(noiseGain); noiseGain.connect(master); noiseGain.connect(tap('noise')); ns.start();
 
     applyVoice(); // pick up the voice settings for the map type already selected
   }
@@ -868,7 +951,7 @@ EJ.audio = (function () {
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime((0.03 + 0.14 * vel) * v.dropGain, when + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0008, when + 1.4);
-    o.connect(g); g.connect(master); g.connect(revSend);
+    o.connect(g); g.connect(dropBus);
     o.start(when); o.stop(when + 1.5);
     if (ice) {
       // A quiet overtone at 2.76× the pitch that fades faster. That in-between partial is what makes it ring like glass.
@@ -877,7 +960,7 @@ EJ.audio = (function () {
       g2.gain.setValueAtTime(0, when);
       g2.gain.linearRampToValueAtTime((0.012 + 0.05 * vel) * v.dropGain, when + 0.003);
       g2.gain.exponentialRampToValueAtTime(0.0005, when + 0.7);
-      o2.connect(g2); g2.connect(master); g2.connect(revSend);
+      o2.connect(g2); g2.connect(dropBus);
       o2.start(when); o2.stop(when + 0.8);
     }
   }
@@ -918,6 +1001,19 @@ EJ.audio = (function () {
     for (var i = 0; i < R; i++) voices[i].g.gain.setTargetAtTime(0, now, 0.06); // fade pad out
     noiseGain.gain.setTargetAtTime(0, now, 0.1);                                // fade hiss out
   };
+  // Fills `out` (any length) with 0..1 levels, low to high pitch on a log scale, for one layer.
+  A.spectrum = function (key, out) {
+    var t = taps[key], n = out.length, i;
+    if (!t || !A.playing) { for (i = 0; i < n; i++) out[i] = 0; return; }
+    t.an.getByteFrequencyData(t.buf);
+    var lo = 40, hi = 8000, bw = ac.sampleRate / t.an.fftSize;
+    for (i = 0; i < n; i++) {
+      var b0 = Math.floor(lo * Math.pow(hi / lo, i / n) / bw), b1 = Math.max(b0 + 1, Math.ceil(lo * Math.pow(hi / lo, (i + 1) / n) / bw)), m = 0;
+      for (var b = b0; b < b1; b++) if (t.buf[b] > m) m = t.buf[b];
+      out[i] = m / 255;
+    }
+  };
+
   // Sound key: plays what "low to high" and "warm" sound like in the CURRENT map's voice.
   A.demo = function (kind) {
     if (!ac) build();
@@ -950,10 +1046,58 @@ EJ.audio = (function () {
     noiseGain.gain.setTargetAtTime(EJ.layers.noise ? EJ.meanRain * v.hiss : 0, now, 0.15);
     // The 'drone' instrument toggle fades the two background sines in or out.
     drones.forEach(function (g) { g.gain.setTargetAtTime(EJ.layers.drone ? 0.03 : 0, now, 0.2); });
-    pan.pan.setTargetAtTime(pos * 1.6 - 0.8, now, 0.05);                 // left → right
+    pan.pan.setTargetAtTime(EJ.sweep.pan(pos), now, 0.05);                 // left → right
   };
 
   return A;
+})();
+
+</script>
+<script>
+// spectrum.js — the "Sounds playing now" panel under the big picture: one live spectrum bar per
+// instrument layer (Pad, Drops, Noise bed, Drone), each with its name and a Mute button.
+// The bars are the real sound of each layer (audio.js taps each one with an analyser).
+// Mute flips the same flag as the Instruments toggle buttons, so the two always agree.
+(function () {
+  var N = 32, box = document.getElementById('specRows'), rows = [];
+  var LAYERS = [
+    { key: 'pad', name: 'Pad', color: 'rgb(255,106,69)', note: function (v) { return v.pad + ', ' + v.scale; } },
+    { key: 'drops', name: 'Drops', color: 'rgb(74,168,255)', note: function (v) { return (v.chime === 'ice' ? 'ice chime' : 'drip') + ', ' + v.scale; } },
+    { key: 'noise', name: 'Noise bed', color: 'rgb(110,190,160)', note: function () { return 'rain, wind or hush'; } },
+    { key: 'drone', name: 'Drone', color: 'rgb(169,155,255)', note: function () { return 'A + E'; } }
+  ];
+  LAYERS.forEach(function (L) {
+    var row = document.createElement('div'); row.className = 'srow';
+    var label = document.createElement('div'); label.className = 'slabel';
+    label.innerHTML = '<b>' + L.name + '</b><small></small>';
+    var cv = document.createElement('canvas'); cv.width = 256; cv.height = 32; cv.setAttribute('aria-hidden', 'true');
+    var btn = document.createElement('button'); btn.className = 'smute'; btn.setAttribute('aria-label', 'Mute ' + L.name);
+    btn.onclick = function () { EJ.layers[L.key] = !EJ.layers[L.key]; EJ.ui.syncToggles(); };
+    row.appendChild(label); row.appendChild(cv); row.appendChild(btn); box.appendChild(row);
+    rows.push({ L: L, row: row, ctx: cv.getContext('2d'), cv: cv, btn: btn, small: label.querySelector('small'), data: new Float32Array(N), muted: null, txt: '' });
+  });
+
+  // Called every frame by app.js.
+  EJ.spectrum = {
+    draw: function (playing) {
+      var v = EJ.map().voice;
+      document.getElementById('specHint').style.display = playing ? 'none' : '';
+      rows.forEach(function (r) {
+        var on = EJ.layers[r.L.key], txt = r.L.note(v);
+        if (r.muted !== !on) { // only touch the page when something changed
+          r.muted = !on; r.btn.textContent = on ? 'Mute' : 'Muted';
+          r.btn.setAttribute('aria-pressed', on ? 'false' : 'true'); r.row.classList.toggle('off', !on);
+        }
+        if (r.txt !== txt) { r.txt = txt; r.small.textContent = txt; }
+        EJ.audio.spectrum(r.L.key, r.data);
+        var w = r.cv.width, h = r.cv.height, bw = w / N, c = r.ctx;
+        c.clearRect(0, 0, w, h);
+        c.fillStyle = on ? r.L.color : 'rgb(128,134,160)'; c.globalAlpha = on ? 1 : 0.35;
+        for (var i = 0; i < N; i++) { var bh = Math.max(2, r.data[i] * h); c.fillRect(i * bw + 1, h - bh, bw - 2, bh); }
+        c.globalAlpha = 1;
+      });
+    }
+  };
 })();
 
 </script>
@@ -979,7 +1123,6 @@ EJ.audio = (function () {
   var src = null;                               // the loaded image or video, or null if nothing is loaded yet
   var objUrl = null;                            // temporary URL of a loaded file
   var region = { x: 0.3, y: 0.25, w: 0.4, h: 0.5 }; // chosen area as fractions (0..1) of the picture
-  var t0 = 0;                                   // time when Play was pressed (for the sweep position)
   var frameCount = 0;
   var vb = $('viewBox');
   function isArea() { return $('mode').value === 'area'; }
@@ -1012,9 +1155,8 @@ EJ.audio = (function () {
 
     // Where are we listening? Area mode: the box centre. Sweep mode: a position moving 0→1 and looping.
     var area = isArea(), playing = EJ.audio.playing;
-    var pos = area ? region.x + region.w / 2
-                   : (playing ? (((ts - t0) / 1000 / parseFloat($('dur').value)) % 1) : 0);
-    EJ.columnLevels(area, Math.min(C - 1, Math.floor(pos * C)));
+    var pos = area ? region.x + region.w / 2 : EJ.sweep.position(ts, playing); // sweeping.js
+    EJ.columnLevels(area, EJ.sweep.column(pos));
 
     // ---- NOTE and SCENE layer gating ----
     // Keep the true, un-muted amounts for the readout (so the numbers always reflect the real
@@ -1030,10 +1172,7 @@ EJ.audio = (function () {
     if (playing) EJ.audio.update(pos);
 
     // Show the sweep line (sweep mode only), on both the source picture and the pixel grid.
-    var on = playing && !area;
-    $('ph').style.display = on ? 'block' : 'none';
-    $('ph2').style.display = on ? 'block' : 'none';
-    if (on) { $('ph').style.left = $('ph2').style.left = (pos * 100) + '%'; }
+    EJ.sweep.showLine(playing && !area, pos);
 
     // Bar meter: warm bar = pad amount in that row, blue bar = drops amount in that row (post-gating,
     // so a muted layer visibly goes flat here too).
@@ -1045,6 +1184,8 @@ EJ.audio = (function () {
         mctx.fillStyle = 'rgb(74,168,255)'; mctx.fillRect(29, r * rh + 1, EJ.rowRain[r] * 26, rh - 2);
       }
     }
+
+    EJ.spectrum.draw(playing); // the "Sounds playing now" panel (spectrum.js)
 
     // Update the text readout every 6th frame (no need to do it more often). Uses the RAW amounts,
     // so it always shows the true picture data even while a layer is muted.
@@ -1187,8 +1328,6 @@ EJ.audio = (function () {
   $('mode').onchange = function () {
     var a = isArea();
     vb.classList.toggle('area', a);      // shows the box and the crosshair cursor
-    $('dur').disabled = a;               // sweep time doesn't apply to area mode
-    t0 = performance.now();
     vb.tabIndex = a ? 0 : -1;
     vb.setAttribute('aria-label', a ? 'Listening area. Arrow keys move the box; Shift plus arrows resize it.' : 'Source picture');
     $('pixCap').textContent = a ? 'What the app hears: only the chosen area, stretched onto a 64 × 14 grid. Each row is a note.'
@@ -1198,7 +1337,7 @@ EJ.audio = (function () {
   $('play').onclick = function () {
     var b = $('play');
     if (!EJ.audio.playing) {
-      t0 = performance.now();
+      EJ.sweep.restart();
       EJ.audio.start(parseFloat($('vol').value)); // must happen inside a click, or browsers block audio
       b.textContent = 'Stop'; b.setAttribute('aria-pressed', 'true');
     } else {
@@ -1208,7 +1347,6 @@ EJ.audio = (function () {
     updateStatus();
   };
   $('vol').oninput = function () { EJ.audio.setVolume(parseFloat($('vol').value)); };
-  $('dur').oninput = function () { $('durO').textContent = $('dur').value + ' s'; t0 = performance.now(); };
 
   // ---------- Map type: applies one entry from EJ.MAPS (maps.js, or a custom upload) to the page ----------
   function applyMapType(id) {
@@ -1310,7 +1448,8 @@ EJ.audio = (function () {
   };
 
   // Exposed so legend-upload.js can add a new map type on the fly and jump straight to it.
-  EJ.ui = { refreshMenu: buildMenu, open: openApp, updateStatus: updateStatus };
+  EJ.ui = { refreshMenu: buildMenu, open: openApp, updateStatus: updateStatus,
+           syncToggles: function () { buildToggles(); updateStatus(); } }; // re-read EJ.layers after a mute button changes it
 
   buildToggles();
   buildMenu();

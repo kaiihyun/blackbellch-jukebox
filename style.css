@@ -96,3 +96,14 @@ dt{font-weight:600}dd{margin:0;color:var(--mut)}
 button{min-height:44px} /* comfortable touch and switch targets */
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 @media (forced-colors:active){.ph,.sel{border:2px solid CanvasText}}
+
+/* ---------- Sounds playing now (spectrum panel) ---------- */
+.spectrum{margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.spechead{display:flex;justify-content:space-between;gap:8px;font-size:.875rem;color:var(--mut);margin-bottom:4px}
+.srow{display:grid;grid-template-columns:92px minmax(0,1fr) auto;gap:10px;align-items:center;padding:3px 0}
+.slabel{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+.slabel small{color:var(--mut);font-size:.72rem}
+.srow canvas{display:block;width:100%;height:32px}
+.srow.off .slabel{opacity:.55}
+.smute{min-width:76px}
+.smute[aria-pressed="true"]{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);font-weight:600}

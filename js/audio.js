@@ -15,7 +15,8 @@
 EJ.audio = (function () {
   var R = EJ.R;
   var ac = null;                       // the AudioContext (created on first Play; browsers need a click first)
-  var master, pan, revSend, lowpass, noiseGain;
+  var master, pan, revSend, lowpass, noiseGain, dropBus;
+  var taps = {};                       // one analyser per layer, for the spectrum panel (spectrum.js)
   var voices = [];                     // one pad voice per row
   var drones = [];                     // the quiet drone oscillators' gain nodes (toggled by EJ.layers.drone)
   var nextTime = 0;                    // when the next drop step is due
@@ -30,6 +31,15 @@ EJ.audio = (function () {
   function noteFreq(i, base, scale) {
     var midi = base + Math.floor(i / 5) * 12 + SCALES[scale || 'major'][i % 5];
     return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  // Analyser for one layer. It only listens (it is a branch off the signal), so it never changes the sound.
+  function tap(key) {
+    if (!taps[key]) {
+      var an = ac.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.75; an.minDecibels = -90; an.maxDecibels = -20;
+      taps[key] = { an: an, buf: new Uint8Array(an.frequencyBinCount) };
+    }
+    return taps[key].an;
   }
 
   // Create every audio node once, the first time the user presses Play.
@@ -59,6 +69,9 @@ EJ.audio = (function () {
     lowpass.type = 'lowpass'; lowpass.Q.value = 2; lowpass.frequency.value = 300;
     var padVerb = ac.createGain(); padVerb.gain.value = 0.25;
     lowpass.connect(master); lowpass.connect(padVerb); padVerb.connect(revSend);
+    lowpass.connect(tap('pad'));
+    // Every drop goes through one bus, so the Drops layer can be metered as a whole.
+    dropBus = ac.createGain(); dropBus.connect(master); dropBus.connect(revSend); dropBus.connect(tap('drops'));
 
     for (var r = 0; r < R; r++) {
       var g = ac.createGain(); g.gain.value = 0; g.connect(lowpass); // silent until the pad amount rises
@@ -74,7 +87,7 @@ EJ.audio = (function () {
     [55, 82.41].forEach(function (f) {
       var o = ac.createOscillator(), g = ac.createGain();
       o.frequency.value = f; g.gain.value = 0;
-      o.connect(g); g.connect(master); o.start();
+      o.connect(g); g.connect(master); g.connect(tap('drone')); o.start();
       drones.push(g);
     });
 
@@ -84,7 +97,7 @@ EJ.audio = (function () {
     var ns = ac.createBufferSource(); ns.buffer = nb; ns.loop = true;
     var bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3500; bp.Q.value = 0.6;
     noiseGain = ac.createGain(); noiseGain.gain.value = 0;
-    ns.connect(bp); bp.connect(noiseGain); noiseGain.connect(master); ns.start();
+    ns.connect(bp); bp.connect(noiseGain); noiseGain.connect(master); noiseGain.connect(tap('noise')); ns.start();
 
     applyVoice(); // pick up the voice settings for the map type already selected
   }
@@ -116,7 +129,7 @@ EJ.audio = (function () {
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime((0.03 + 0.14 * vel) * v.dropGain, when + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0008, when + 1.4);
-    o.connect(g); g.connect(master); g.connect(revSend);
+    o.connect(g); g.connect(dropBus);
     o.start(when); o.stop(when + 1.5);
     if (ice) {
       // A quiet overtone at 2.76× the pitch that fades faster. That in-between partial is what makes it ring like glass.
@@ -125,7 +138,7 @@ EJ.audio = (function () {
       g2.gain.setValueAtTime(0, when);
       g2.gain.linearRampToValueAtTime((0.012 + 0.05 * vel) * v.dropGain, when + 0.003);
       g2.gain.exponentialRampToValueAtTime(0.0005, when + 0.7);
-      o2.connect(g2); g2.connect(master); g2.connect(revSend);
+      o2.connect(g2); g2.connect(dropBus);
       o2.start(when); o2.stop(when + 0.8);
     }
   }
@@ -166,6 +179,19 @@ EJ.audio = (function () {
     for (var i = 0; i < R; i++) voices[i].g.gain.setTargetAtTime(0, now, 0.06); // fade pad out
     noiseGain.gain.setTargetAtTime(0, now, 0.1);                                // fade hiss out
   };
+  // Fills `out` (any length) with 0..1 levels, low to high pitch on a log scale, for one layer.
+  A.spectrum = function (key, out) {
+    var t = taps[key], n = out.length, i;
+    if (!t || !A.playing) { for (i = 0; i < n; i++) out[i] = 0; return; }
+    t.an.getByteFrequencyData(t.buf);
+    var lo = 40, hi = 8000, bw = ac.sampleRate / t.an.fftSize;
+    for (i = 0; i < n; i++) {
+      var b0 = Math.floor(lo * Math.pow(hi / lo, i / n) / bw), b1 = Math.max(b0 + 1, Math.ceil(lo * Math.pow(hi / lo, (i + 1) / n) / bw)), m = 0;
+      for (var b = b0; b < b1; b++) if (t.buf[b] > m) m = t.buf[b];
+      out[i] = m / 255;
+    }
+  };
+
   // Sound key: plays what "low to high" and "warm" sound like in the CURRENT map's voice.
   A.demo = function (kind) {
     if (!ac) build();
@@ -198,7 +224,7 @@ EJ.audio = (function () {
     noiseGain.gain.setTargetAtTime(EJ.layers.noise ? EJ.meanRain * v.hiss : 0, now, 0.15);
     // The 'drone' instrument toggle fades the two background sines in or out.
     drones.forEach(function (g) { g.gain.setTargetAtTime(EJ.layers.drone ? 0.03 : 0, now, 0.2); });
-    pan.pan.setTargetAtTime(pos * 1.6 - 0.8, now, 0.05);                 // left → right
+    pan.pan.setTargetAtTime(EJ.sweep.pan(pos), now, 0.05);                 // left → right
   };
 
   return A;

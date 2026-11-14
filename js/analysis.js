@@ -56,8 +56,9 @@
 
   // Pick the pad and drops amounts for each ROW (= each note).
   //  area mode  → use the whole grid (which already holds only the chosen area)
-  //  sweep mode → use just the 3 columns under the sweep line (col-1, col, col+1)
+  //  sweep mode → handled by EJ.sweep.levels() in sweeping.js
   EJ.columnLevels = function (area, col) {
+    if (!area) { EJ.sweep.levels(col); return; } // sweep mode lives in sweeping.js
     for (var r = 0; r < R; r++) {
       var a = 0, b = 0, n = 0, c;
       if (area) {
@@ -71,10 +72,6 @@
         // Blend of the average and the strongest cell, so small hot spots still get heard.
         EJ.rowHeat[r] = 0.5 * (a / C + ma);
         EJ.rowRain[r] = 0.5 * (b / C + mb);
-      } else {
-        for (c = Math.max(0, col - 1); c <= Math.min(C - 1, col + 1); c++) { a += EJ.HH[r * C + c]; b += EJ.WW[r * C + c]; n++; }
-        EJ.rowHeat[r] = a / n;
-        EJ.rowRain[r] = b / n;
       }
     }
   };
