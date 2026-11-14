@@ -20,4 +20,4 @@ EJ.clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
 //   pad / drops / noise / drone  INSTRUMENT layers — the actual voices in audio.js
 //   scene                   SCENE layer   — the picture-to-sound pipeline as a whole; turning
 //                            this off mutes everything the picture drives, leaving only the drone
-EJ.layers = { notesWarm: true, notesCold: true, pad: true, drops: true, noise: true, drone: true, scene: true };
+EJ.layers = { notesWarm: true, notesCold: true, pad: true, drops: true, noise: true, drone: true, scene: true, haptic: false };

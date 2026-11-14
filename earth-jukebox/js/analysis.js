@@ -78,4 +78,25 @@
       }
     }
   };
+
+  // Plain-language description of the current frame, for blind and low-vision listeners (and anyone else).
+  // Splits the grid into 3 × 3 regions and names where each amount is strongest.
+  var NS = ['north', 'middle', 'south'], WE = ['west', 'centre', 'east'];
+  function where(G) {
+    var best = 0, bi = -1, tot = 0, s = new Float32Array(9), r, c;
+    for (r = 0; r < R; r++) for (c = 0; c < C; c++) { var k = Math.min(2, r * 3 / R | 0) * 3 + Math.min(2, c * 3 / C | 0); s[k] += G[r * C + c]; }
+    for (var i = 0; i < 9; i++) { tot += s[i]; if (s[i] > best) { best = s[i]; bi = i; } }
+    if (bi < 0 || best < 2) return '';
+    var ns = (bi / 3 | 0), we = bi % 3;
+    return ns === 1 && we === 1 ? 'in the middle of the frame' : 'strongest in the ' + (ns === 1 ? '' : NS[ns] + (we === 1 ? '' : '-')) + (we === 1 && ns !== 1 ? '' : WE[we] === 'centre' && ns === 1 ? '' : WE[we]);
+  }
+  function level(x) { return x < 0.03 ? 'almost none' : x < 0.25 ? 'light' : x < 0.55 ? 'moderate' : 'strong'; }
+  EJ.describe = function () {
+    var m = EJ.map(), h = EJ.meanHeatRaw || 0, w = EJ.meanRainRaw || 0, out = [m.name + '.'];
+    out.push(m.labels[0] + ': ' + level(h) + ' (' + Math.round(h * 100) + '%)' + (h >= 0.03 ? ', ' + where(EJ.HH) : '') + '.');
+    out.push(m.labels[1] + ': ' + level(w) + ' (' + Math.round(w * 100) + '%)' + (w >= 0.03 ? ', ' + where(EJ.WW) : '') + '.');
+    if (EJ.meanValue !== null && m.fmt && m.avg) out.push(m.avg + ': ' + m.fmt(EJ.meanValue) + '.');
+    out.push('Tempo ' + Math.round(EJ.tempo || 0) + ' beats per minute, in a ' + m.voice.scale + ' scale (' + (m.voice.scale === 'minor' ? 'darker' : 'brighter') + '). High notes are the north, low notes the south.');
+    return out.join(' ');
+  };
 })();

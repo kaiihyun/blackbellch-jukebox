@@ -21,12 +21,14 @@ EJ.audio = (function () {
   var nextTime = 0;                    // when the next drop step is due
   var A = { playing: false };          // public object; A.playing is read by app.js
 
-  var SCALE = [0, 2, 4, 7, 9];         // A major pentatonic: any combination sounds pleasant
+  // Two pentatonic scales on the same root (A). Any mix of notes inside one scale sounds pleasant.
+  //   major = open and bright, minor = darker and more tense. Each map picks one in maps.js (voice.scale).
+  var SCALES = { major: [0, 2, 4, 7, 9], minor: [0, 3, 5, 7, 10] };
 
   // Frequency of note number i (0 = lowest) starting from MIDI note `base`.
   // 5 notes per octave, so i=5 is exactly one octave above i=0.
-  function noteFreq(i, base) {
-    var midi = base + Math.floor(i / 5) * 12 + SCALE[i % 5];
+  function noteFreq(i, base, scale) {
+    var midi = base + Math.floor(i / 5) * 12 + SCALES[scale || 'major'][i % 5];
     return 440 * Math.pow(2, (midi - 69) / 12);
   }
 
@@ -92,7 +94,12 @@ EJ.audio = (function () {
   function applyVoice() {
     if (!ac) return;
     var v = EJ.map().voice;
-    voices.forEach(function (voice) { voice.a.type = voice.b.type = v.pad; });
+    voices.forEach(function (voice, r) { // r = row index, lowest voice first
+      voice.a.type = voice.b.type = v.pad;
+      var f = noteFreq(r, 33, v.scale); // retune the pad to this map's scale (glides, so no click)
+      voice.a.frequency.setTargetAtTime(f, ac.currentTime, 0.05);
+      voice.b.frequency.setTargetAtTime(f, ac.currentTime, 0.05);
+    });
     revSend.gain.setTargetAtTime(v.reverb, ac.currentTime, 0.3);
   }
   A.applyVoice = applyVoice;
@@ -100,7 +107,7 @@ EJ.audio = (function () {
   // Play one "drop" (a drip or a chime) on note i at time `when`. vel (0..1) is its strength.
   function drop(i, when, vel) {
     var v = EJ.map().voice, ice = v.chime === 'ice';     // 'ice' → steady glassy chime, 'drip' → falling drip
-    var o = ac.createOscillator(), g = ac.createGain(), f = noteFreq(i, v.base);
+    var o = ac.createOscillator(), g = ac.createGain(), f = noteFreq(i, v.base, v.scale);
     o.type = 'sine';
     // A drip starts a bit high and falls quickly; a chime keeps one steady pitch.
     o.frequency.setValueAtTime(ice ? f : f * 1.35, when);
@@ -158,6 +165,21 @@ EJ.audio = (function () {
     var now = ac.currentTime;
     for (var i = 0; i < R; i++) voices[i].g.gain.setTargetAtTime(0, now, 0.06); // fade pad out
     noiseGain.gain.setTargetAtTime(0, now, 0.1);                                // fade hiss out
+  };
+  // Sound key: plays what "low to high" and "warm" sound like in the CURRENT map's voice.
+  A.demo = function (kind) {
+    if (!ac) build();
+    if (ac.state === 'suspended') ac.resume();
+    var t = ac.currentTime + 0.05, v = EJ.map().voice, i;
+    master.gain.value = A.playing ? master.gain.value : 0.7;
+    if (kind === 'scale') { for (i = 0; i < R; i += 1) drop(i, t + i * 0.16, 0.6); return R * 0.16 + 1.5; }
+    var o = ac.createOscillator(), g = ac.createGain(); // warm tone swelling and brightening
+    o.type = v.pad; o.frequency.value = 110; lowpass.frequency.cancelScheduledValues(t);
+    lowpass.frequency.setValueAtTime(v.cutoff[0], t); lowpass.frequency.linearRampToValueAtTime(v.cutoff[1], t + 2);
+    lowpass.frequency.linearRampToValueAtTime(300, t + 3);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.12, t + 1.8); g.gain.linearRampToValueAtTime(0, t + 3);
+    o.connect(g); g.connect(lowpass); o.start(t); o.stop(t + 3.1);
+    return 3;
   };
   A.setVolume = function (v) { if (master) master.gain.value = v; };
 

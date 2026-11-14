@@ -93,38 +93,65 @@
       $('rh').textContent = Math.round(EJ.meanHeatRaw * 100) + '%';
       $('rw').textContent = Math.round(EJ.meanRainRaw * 100) + '%';
       $('rt').textContent = Math.round(EJ.tempo);
+      $('desc').textContent = EJ.describe();
       $('ra').textContent = (EJ.meanValue === null || !m.fmt) ? '–' : m.fmt(EJ.meanValue);
     }
+    // Tactile feedback (phones): a short buzz whose length follows the pad amount.
+    if (playing && EJ.layers.haptic && navigator.vibrate && frameCount % 20 === 0 && EJ.meanHeatRaw > 0.1)
+      navigator.vibrate(Math.round(20 + EJ.meanHeatRaw * 120));
     requestAnimationFrame(frame);
   }
 
   // ---------- Loading your own image or video ----------
+  function kindOf(f) { // some phones leave f.type empty, so fall back to the file extension
+    var t = f.type || '', n = f.name || '';
+    if (t.indexOf('video') === 0 || /\.(mp4|m4v|mov|webm|ogv|3gp)$/i.test(n)) return 'video';
+    if (t.indexOf('image') === 0 || /\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/i.test(n)) return 'image';
+    return null;
+  }
   function loadFile(f) {
     if (!f) return;
+    var kind = kindOf(f);
+    if (!kind) { $('cap').textContent = 'That file is not an image or video. Try a PNG, JPG, MP4, MOV or WebM.'; return; }
+    if (src && src.kind === 'video') src.el.pause();
     if (objUrl) URL.revokeObjectURL(objUrl);
     objUrl = URL.createObjectURL(f);
-    function use(kind, el) { // switch the picture to the loaded file
-      src = { kind: kind, el: el, name: f.name };
+    $('cap').textContent = 'Loading ' + f.name + '…';
+    function use(k, el) { // switch the picture to the loaded file
+      src = { kind: k, el: el, name: f.name };
       updateStatus();
       var m = EJ.map();
       $('cap').textContent = 'Source: ' + f.name + (m.legend
         ? '. Colors are matched to the ' + m.name.toLowerCase() + ' legend.'
         : '. Warm colors play as heat, blue as rain.');
     }
-    if (f.type.indexOf('video') === 0) {
-      var v = document.createElement('video');
-      v.muted = true; v.loop = true; v.playsInline = true; v.src = objUrl;
-      v.onloadeddata = function () { v.play(); use('video', v); };
-    } else if (f.type.indexOf('image') === 0) {
+    if (kind === 'video') {
+      var v = document.createElement('video'), shown = false;
+      v.muted = true; v.loop = true; v.playsInline = true;
+      v.setAttribute('playsinline', ''); v.setAttribute('muted', ''); // iPhones need the attributes, not just the properties
+      v.onerror = function () { $('cap').textContent = 'This browser could not play that video. Try an MP4 (H.264) or a still image.'; };
+      v.onloadeddata = function () {
+        if (shown) return; shown = true; use('video', v);
+        var p = v.play();
+        if (p && p.catch) p.catch(function () { $('cap').textContent += ' Tap the picture to start the video.'; });
+      };
+      v.src = objUrl; v.load();
+    } else {
       var im = new Image();
       im.onload = function () { use('image', im); };
+      im.onerror = function () { $('cap').textContent = 'Could not open that image. Try a JPG or PNG (on iPhone, choose it from Photos so it is converted).'; };
       im.src = objUrl;
-    } else {
-      $('cap').textContent = 'That file is not an image or video. Try a PNG, JPG, MP4 or WebM.';
     }
   }
   $('pick').onclick = function () { $('file').click(); };
+  $('cam').onclick = function () { $('camFile').click(); };
   $('file').onchange = function (e) { loadFile(e.target.files[0]); e.target.value = ''; };
+  $('camFile').onchange = function (e) { loadFile(e.target.files[0]); e.target.value = ''; };
+  // Tap the picture: opens the file picker if nothing is loaded, or starts a video the browser would not autoplay.
+  vb.addEventListener('click', function () {
+    if (!src) $('file').click();
+    else if (src.kind === 'video' && src.el.paused) src.el.play();
+  });
   // Drag and drop a file onto the picture.
   vb.addEventListener('dragover', function (e) { e.preventDefault(); vb.classList.add('drop'); });
   vb.addEventListener('dragleave', function () { vb.classList.remove('drop'); });
@@ -175,12 +202,35 @@
   });
   vb.addEventListener('pointercancel', function () { drag = null; });
 
+  // Keyboard control of the chosen area: arrows move the box, Shift+arrows resize it.
+  vb.addEventListener('keydown', function (e) {
+    if (!isArea() || e.key.indexOf('Arrow') !== 0) return;
+    var d = 0.04, dx = e.key === 'ArrowRight' ? d : e.key === 'ArrowLeft' ? -d : 0, dy = e.key === 'ArrowDown' ? d : e.key === 'ArrowUp' ? -d : 0;
+    if (e.shiftKey) { region.w = Math.max(0.08, region.w + dx); region.h = Math.max(0.1, region.h + dy); } else { region.x += dx; region.y += dy; }
+    clampRegion(); showSel(); e.preventDefault();
+  });
+
+  // ---------- Describe + sound key + shortcuts ----------
+  function describeNow() { var s = $('sr'); s.textContent = ''; setTimeout(function () { s.textContent = EJ.describe(); }, 50); } // re-set so screen readers re-announce
+  $('describe').onclick = describeNow;
+  $('keyScale').onclick = function () { EJ.audio.demo('scale'); $('sr').textContent = 'Playing the note scale, lowest note first. The top of the picture plays the highest note.'; };
+  $('keyWarm').onclick = function () { EJ.audio.demo('warm'); $('sr').textContent = 'Playing the warm tone: it swells and brightens as heat rises.'; };
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (appEl.style.display === 'none') return;
+    if (e.key === 'd' || e.key === 'D') describeNow();
+    else if (e.key === 'p' || e.key === 'P') $('play').click();
+  });
+
   // ---------- Controls ----------
   $('mode').onchange = function () {
     var a = isArea();
     vb.classList.toggle('area', a);      // shows the box and the crosshair cursor
     $('dur').disabled = a;               // sweep time doesn't apply to area mode
     t0 = performance.now();
+    vb.tabIndex = a ? 0 : -1;
+    vb.setAttribute('aria-label', a ? 'Listening area. Arrow keys move the box; Shift plus arrows resize it.' : 'Source picture');
     $('pixCap').textContent = a ? 'What the app hears: only the chosen area, stretched onto a 64 × 14 grid. Each row is a note.'
                                 : 'What the app hears: the whole frame shrunk to a 64 × 14 grid. Each row is a note.';
     $('hint').textContent = a ? 'Drag on the picture to choose an area, or click to move the box. Only that area is played, and it keeps playing while the picture changes.' : '';
@@ -230,7 +280,8 @@
     { key: 'drops', label: 'Drops', group: 'instruments' },
     { key: 'noise', label: 'Noise bed', group: 'instruments' },
     { key: 'drone', label: 'Drone', group: 'instruments' },
-    { key: 'scene', label: 'Scene', group: 'scene' }
+    { key: 'scene', label: 'Scene', group: 'scene' },
+    { key: 'haptic', label: 'Vibrate', group: 'scene' }
   ];
   function buildToggles() {
     ['notes', 'instruments', 'scene'].forEach(function (group) {
@@ -257,8 +308,8 @@
     var instruments = on(['pad', 'drops', 'noise', 'drone']);
     var v = EJ.map().voice;
     var instrumentNames = instruments.map(function (label) {
-      if (label === 'Pad') return 'Pad (' + v.pad + ')';
-      if (label === 'Drops') return 'Drops (' + (v.chime === 'ice' ? 'ice chime' : 'drip') + ')';
+      if (label === 'Pad') return 'Pad (' + v.pad + ', ' + v.scale + ' scale)';
+      if (label === 'Drops') return 'Drops (' + (v.chime === 'ice' ? 'ice chime' : 'drip') + ', ' + v.scale + ' scale)';
       return label;
     });
     var sceneText = !EJ.layers.scene ? 'muted' : (src ? src.name : 'no source loaded');

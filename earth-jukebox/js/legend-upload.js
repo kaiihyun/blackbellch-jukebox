@@ -110,7 +110,7 @@
       // Generic split around the midpoint of lo..hi: above it drives the pad, below it drives drops.
       levels: function (v, o) { var mid = (lo + hi) / 2, span = Math.max(1e-6, hi - lo) / 2;
         o[0] = Math.sqrt(EJ.clamp01((v - mid) / span)); o[1] = Math.sqrt(EJ.clamp01((mid - v) / span)); },
-      voice: { chime: 'ice', base: 69, dropGain: 1, pad: 'sawtooth', cutoff: [200, 2800], detune: [4, 30], tempo: [64, 128], tempoFrom: 'heat', reverb: 0.5, hiss: 0.04 }
+      voice: { scale: 'major', chime: 'ice', base: 69, dropGain: 1, pad: 'sawtooth', cutoff: [200, 2800], detune: [4, 30], tempo: [64, 128], tempoFrom: 'heat', reverb: 0.5, hiss: 0.04 }
     };
     function fmt2(v) { return (Math.round(v * 100) / 100).toString(); }
     function syncTicks() { EJ.MAPS[id].ticks = [fmt2(lo), fmt2((lo + hi) / 2), fmt2(hi)]; }
