@@ -1,0 +1,41 @@
+[
+  {
+    "id": "lst",
+    "name": "Global temperature video (T2M)",
+    "map": "temp",
+    "video": "media/lst.mp4",
+    "video_options": { "reencode": false, "sweep": 24 }
+  },
+  {
+    "id": "nox",
+    "name": "Global NOx video",
+    "map": "nox",
+    "video": "media/nox.mp4",
+    "video_options": { "reencode": false, "sweep": 24 }
+  },
+
+  {
+    "_comment": "TEMPLATE for a brand-new map + video. Copy it, fill it in, set enabled to true. Every key except id, name and legend.image is optional.",
+    "enabled": false,
+    "id": "example",
+    "name": "Example gas",
+    "blurb": "Shown on the menu card.",
+    "video": "media/example.mp4",
+    "video_options": { "width": 768, "crf": 26, "sweep": 24, "reencode": true, "check_time": 5 },
+    "legend": {
+      "image": "media/example_legend.png",
+      "type": "auto",
+      "lo": 0, "hi": 10, "log10": false, "units": "ppb",
+      "samples": 41, "tol": 50,
+      "bar": { "row": null, "x0": null, "x1": null }
+    },
+    "ticks": null,
+    "labels": ["Hum", "Ticks"],
+    "pad":   [0.3, 1.0, "sqrt"],
+    "drops": [0.1, 1.0, "pow1.5"],
+    "like": "temp",
+    "voice": { "scale": "minor", "chime": "drip", "tempo": [60, 132] },
+    "graph": null,
+    "coverage": null
+  }
+]
