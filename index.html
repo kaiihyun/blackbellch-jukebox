@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Earth Jukebox</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#play">Skip to playback controls</a>
+<main>
+  <!-- ---------- Main menu: pick a map type ---------- -->
+  <section id="menu">
+    <h1>Earth Jukebox</h1>
+    <p class="lead">Pick a kind of Earth data to hear. Each one is matched to a real NASA-style color legend and sounds different.</p>
+    <div class="cards" id="menuCards"></div>
+    <!-- Cards are built by app.js from the list in maps.js -->
+  </section>
+
+  <!-- ---------- The jukebox itself (hidden until a card is chosen) ---------- -->
+  <section id="app" style="display:none">
+    <div class="apphead">
+      <button id="menuBtn">&larr; Menu</button>
+      <h1 id="appTitle">Earth Jukebox</h1>
+    </div>
+
+  <p class="lead">Hot or heavy areas glow into a warm, buzzing tone. Cold or wet areas ring or fall as drops. A line sweeps west to east and plays what it passes over.</p>
+
+  <!-- Two panes side by side: the big SOURCE picture, and the small pixelated grid the app actually analyzes -->
+  <div class="stage">
+    <figure class="pane">
+      <div class="view" id="viewBox" aria-label="Source picture">
+        <canvas id="view" width="640" height="320" role="img" aria-label="Source picture. Use Describe scene for a text description."></canvas>
+        <div class="ph" id="ph"></div>   <!-- sweep line -->
+        <div class="sel" id="sel"></div> <!-- chosen-area box -->
+      </div>
+      <figcaption>Source: load your own picture or video below. The sound comes from the area under the white line or box.</figcaption>
+    </figure>
+    <figure class="pane">
+      <div class="pixrow">
+        <div class="pixbox">
+          <!-- This canvas is only 64×14 real pixels; CSS enlarges it without smoothing so you can see them -->
+          <canvas id="pix" width="64" height="14" aria-hidden="true"></canvas>
+          <div class="ph" id="ph2"></div> <!-- sweep line, mirrored from the source -->
+        </div>
+        <!-- Little bar meter, one bar per grid row: warm = heat, blue = rain -->
+        <div class="mwrap"><canvas id="meter" width="56" height="320" aria-hidden="true"></canvas></div>
+      </div>
+      <figcaption id="pixCap">What the app hears: the whole frame shrunk to a 64 × 14 grid. Each row is a note.</figcaption>
+    </figure>
+  </div>
+
+  <div class="read">
+    <span class="h"><span id="lh">Warm</span> <b id="rh">0%</b></span>
+    <span class="w"><span id="lw">Cold</span> <b id="rw">0%</b></span>
+    <span id="avgWrap"><span id="avgLabel">Average</span> <b id="ra">–</b></span>
+    <span>Tempo <b id="rt">0</b> BPM</span>
+  </div>
+  <!-- Legend strip (temperature mode). The colours are filled in by app.js from legend.js -->
+  <div class="legend" id="legendBox">
+    <div class="legendbar" id="legendBar"></div>
+    <div class="legendticks" id="legendTicks"></div>
+  </div>
+  <p class="desc" id="desc"></p>
+  <div class="sr" id="sr" role="status" aria-live="polite"></div>
+  <div class="tools">
+    <button id="describe">Describe scene (D)</button>
+    <button id="keyScale">Hear the note scale</button>
+    <button id="keyWarm">Hear the warm tone</button>
+  </div>
+  <p class="cap" id="cap" aria-live="polite"></p>
+  <p class="cap" id="hint"></p>
+
+  <div class="panel">
+    <div class="f"><label for="dtype">Map type</label><select id="dtype"></select></div>
+    <div class="f"><span>Playback</span><button class="go" id="play" aria-pressed="false">Play</button></div>
+    <div class="f"><label for="mode">Listening mode</label>
+      <select id="mode">
+        <option value="sweep">Sweep across the frame</option>
+        <option value="area">Listen to a chosen area</option>
+      </select></div>
+    <div class="f"><span>Source media</span><button id="pick">Load image or video</button><input type="file" id="file" accept="image/*,video/*,.heic,.heif,.mov,.mp4,.webm">
+      <button id="cam">Take photo or video</button><input type="file" id="camFile" accept="image/*,video/*" capture="environment"></div>
+    <div class="f"><label for="dur">Sweep time: <b id="durO">16 s</b></label><input type="range" id="dur" min="6" max="40" step="1" value="16"></div>
+    <div class="f"><label for="vol">Volume</label><input type="range" id="vol" min="0" max="1" step="0.01" value="0.7"></div>
+    <div class="f">
+      <span>Upload a legend</span>
+      <button id="legendPick">Upload legend image</button>
+      <input type="file" id="legendFile" accept="image/*">
+      <div class="legendrange" id="legendRange" style="display:none">
+        <label>Min <input type="number" id="legendMin" step="any" value="0"></label>
+        <label>Max <input type="number" id="legendMax" step="any" value="1"></label>
+      </div>
+    </div>
+  </div>
+  <p class="cap" id="legendCap" aria-live="polite"></p>
+
+  <!-- ---------- Layer toggles: Notes / Instruments / Scene ---------- -->
+  <!-- Buttons are built by app.js from the TOGGLES list; this just lays out the three groups. -->
+  <div class="layers">
+    <div class="layergroup">
+      <span class="layerlabel">Notes</span>
+      <div class="togglerow" id="toggles-notes"></div>
+    </div>
+    <div class="layergroup">
+      <span class="layerlabel">Instruments</span>
+      <div class="togglerow" id="toggles-instruments"></div>
+    </div>
+    <div class="layergroup">
+      <span class="layerlabel">Scene</span>
+      <div class="togglerow" id="toggles-scene"></div>
+    </div>
+  </div>
+  <p class="status">
+    Notes playing: <b id="statusNotes">–</b><br>
+    Instruments playing: <b id="statusInstruments">–</b><br>
+    Scene: <b id="statusScene">–</b>
+  </p>
+
+  <h2>How the sound is made</h2>
+  <dl>
+    <dt>Temperature maps</dt><dd>Each pixel is matched to the closest color on the NASA T2M legend, which gives a temperature from −40 to 40 °C. Warm temperatures feed a pad of two saw waves that gets louder, buzzier, brighter and faster as it heats up. Cold temperatures ring as glassy ice chimes over a bed of wind. Around 5 °C both are silent, so mild areas are the quietest.</dd>
+    <dt>Heat and rain maps</dt><dd>The original rule: red, orange and yellow count as heat and play the same buzzing pad. Blue counts as rain and falls as short drips in a shared reverb.</dd>
+    <dt>Top to bottom</dt><dd>Every row is a note of an A pentatonic scale, north high and south low. Land temperature and rain use the minor scale (darker, more tense). Sea temperature, snow and the red and blue rule use the major scale (brighter, more open).</dd>
+    <dt>West to east</dt><dd>The playhead moves across the frame and pans the sound left to right. A quiet drone keeps calm regions from going silent.</dd>
+    <dt>Chosen area</dt><dd>In area mode only the boxed region is analyzed, stretched onto the same grid.</dd>
+    <dt>Real frames</dt><dd>Load a frame or clip from NASA’s Earth Information Center, or any picture or video, with "Source media". Colors that are not on the legend, such as grey borders, labels and the grey bars around a small picture, make no sound.</dd>
+    <dt>Your own legend</dt><dd>"Upload a legend image" reads any color-bar picture: it finds the bar, samples its colors, and guesses whether it is a smooth gradient or a row of distinct steps. Tell it what the lowest and highest values mean and it becomes a new map type, sonified the same way.</dd>
+    <dt>Layer toggles</dt><dd>Notes mutes the row data itself (Warm or Cold); Instruments mutes a specific voice (Pad, Drops, Noise bed, Drone) however the data looks; Scene mutes everything the picture drives at once, leaving only the drone.</dd>
+  </dl>
+
+  <h2>Why Earth sounds like this</h2>
+  <p class="lead">Climate change is mostly shown as pictures, which leaves out people who cannot see them. This jukebox turns the same NASA frames into sound, so heat waves, storms and ice can be heard as well as seen. Hotter air buzzes louder and faster. Heavier rain falls thicker and brings thunder. Colder water rings quieter and slower. A heat dome sounds urgent and a polar sea sounds still, which is the point.</p>
+  <h2>Using it without sight</h2>
+  <dl>
+    <dt>Keys</dt><dd>D describes the scene in words. P plays and stops. Arrow keys move the listening box in area mode; Shift with arrows resizes it.</dd>
+    <dt>Sound key</dt><dd>Press "Hear the note scale" and "Hear the warm tone" first. They teach the two sounds you will hear in whichever map is open.</dd>
+    <dt>Vibration</dt><dd>On a phone, switch on "Vibrate" under Scene. Longer buzzes mean more heat.</dd>
+  </dl>
+  </section>
+</main>
+
+<!-- Load order matters: each file uses the ones above it. -->
+<script src="js/config.js"></script>
+<script src="js/legend.js"></script>
+<script src="js/maps.js"></script>
+<script src="js/legend-upload.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
