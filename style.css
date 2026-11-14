@@ -1,0 +1,169 @@
+/* Earth Jukebox: the DANIG glass look. One dark theme over the Earth photo; the page never scrolls.
+   Sizes are in rem so the Text size setting scales the whole layout. */
+:root{--font:"Poppins",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--accent:#5aa9ee;--on-accent:#04101f;
+  --glass:rgba(12,17,28,.52);--edge:rgba(255,255,255,.22);--panel:rgba(255,255,255,.07);--line:rgba(255,255,255,.2);--mut:#c9d3e2;
+  --hot:#ff6a45;--wet:#4aa8ff;--r:28px;--ease:cubic-bezier(.2,.8,.2,1);--reserve:25rem;color-scheme:dark}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{font-size:var(--fs,100%);height:100%;overflow:hidden;background:#02050b}
+body{margin:0;height:100%;max-width:100vw;overflow:hidden;display:flex;flex-direction:column;color:#fff;font:300 .95rem/1.45 var(--font);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  background:url(assets/earth.png) center bottom/cover no-repeat,radial-gradient(120% 55% at 50% 118%,#2b78c8 0%,#0b2a52 38%,transparent 62%),#02050b}
+body::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(rgba(2,5,11,.3),rgba(2,5,11,.6));pointer-events:none}
+h1,h2,h3,p{margin:0}
+kbd{font:500 .75em var(--font);padding:0 .4em;border:1px solid rgba(255,255,255,.4);border-radius:6px;background:rgba(0,0,0,.3)}
+.cap{font-size:.8rem;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap.center{text-align:center}
+
+/* ---------- Glass surfaces and buttons ---------- */
+.glass,.sheet,.panel{background:var(--glass);border:1px solid var(--edge);-webkit-backdrop-filter:blur(22px) saturate(150%);backdrop-filter:blur(22px) saturate(150%);
+  box-shadow:0 24px 70px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.2)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn,.arrow{min-height:2.5rem;padding:.3rem 1.1rem;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.3);border-radius:999px;color:#fff;white-space:nowrap;
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);transition:background .25s var(--ease),transform .25s var(--ease),border-color .25s,box-shadow .25s}
+.btn:hover,.arrow:hover{background:rgba(255,255,255,.2);border-color:#fff;transform:translateY(-1px)}
+.btn:active,.arrow:active{transform:scale(.97)}
+.btn:disabled{opacity:.45;cursor:default;transform:none}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600;box-shadow:0 8px 28px rgba(90,169,238,.35)}
+.btn.pri:hover{background:#8cc4f5;border-color:#8cc4f5}
+.btn.pill{padding:.3rem 1.4rem}
+.btn.big{min-width:11.9rem;height:3.4rem;font-size:1.2rem;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:.6rem}
+.btn.icon{width:2.5rem;padding:0;font-size:1.6rem;line-height:1}
+.btn.sm{display:inline-flex;align-items:center;gap:.5rem;padding:.2rem .8rem}
+.btn kbd{color:inherit;background:rgba(0,0,0,.25)}
+.btn.pri kbd{border-color:rgba(0,0,0,.45)}
+.arrow{width:3.25rem;height:3.25rem;padding:0;display:grid;place-items:center}
+#prev:hover{transform:translateX(-3px)}#next:hover{transform:translateX(3px)}
+input[type=range]{width:100%;accent-color:var(--accent);background:none;border:0}
+input[type=file]{display:none}
+:focus-visible{outline:3px solid #fff;outline-offset:3px;box-shadow:0 0 0 6px rgba(90,169,238,.6)}
+.skip{position:absolute;left:8px;top:-60px;background:var(--accent);color:var(--on-accent);padding:8px 12px;border-radius:8px;z-index:9}
+.skip:focus{top:8px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- Top bar: About centered, Setting at the right ---------- */
+.bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:.6rem;padding:calc(env(safe-area-inset-top,0px) + .7rem) 1.25rem .6rem}
+.bar .logo{justify-self:start;width:3.75rem;color:#fff}
+.bar #helpBtn{justify-self:end;display:inline-flex;align-items:center;gap:.5rem}
+.home .bar .logo{visibility:hidden}
+.views{flex:1;min-height:0;display:flex;flex-direction:column}
+
+/* ---------- Screens: landing, playlist, player ---------- */
+.landing,#panel{display:none}
+.home #main,.playing #main{display:none}
+.home .landing{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;flex:1;min-height:0;padding:0 1rem 6dvh;animation:rise .9s var(--ease) both}
+.playing #panel{display:flex}
+.landing .logo{width:4.5rem;color:#fff;margin-bottom:.4rem}
+.landing h1{font-size:clamp(2.2rem,min(10dvh,11vw),5rem);font-weight:600;letter-spacing:.04em;line-height:1.05}
+.landing .tag{margin:.4rem 0 1.3rem;font-size:clamp(.8rem,2.2dvh,1rem);letter-spacing:.12em;text-transform:uppercase;color:#dfe7f3}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+
+/* ---------- Playlist carousel ---------- */
+.wrap{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center}
+.top{display:flex;flex-direction:column;align-items:center;gap:clamp(10px,3dvh,26px);padding:0 1rem 4dvh}
+.carousel{display:grid;grid-template-columns:auto minmax(0,700px) auto;gap:clamp(8px,3vw,44px);align-items:center;justify-content:center;width:100%}
+.mid{min-width:0;display:flex;justify-content:center}
+.mid>*{width:100%}
+.slide{position:relative;padding:clamp(18px,4dvh,34px) clamp(18px,4vw,40px) clamp(16px,3dvh,26px);border-radius:var(--r);text-align:center;transition:opacity .28s var(--ease),transform .28s var(--ease)}
+.top.swap .slide{opacity:0;transform:translateY(8px) scale(.985)}
+.slide h2{font-size:clamp(1.15rem,3.4dvh,1.9rem);font-weight:600;margin:.25rem 5rem .9rem;line-height:1.2}
+.gradbox{height:clamp(48px,20dvh,250px);border-radius:22px;border:2px solid rgba(255,255,255,.85);box-shadow:inset 0 0 40px rgba(255,255,255,.12),0 10px 40px rgba(0,0,0,.35)}
+.slide .legendticks{padding:0 .4rem}
+#pDesc{margin-top:.9rem;color:#e8edf5;font-size:.95rem;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#pIdx{margin-top:.5rem;color:var(--mut);font-size:.85rem;font-variant-numeric:tabular-nums}
+.exit{position:absolute;top:14px;right:16px;display:inline-flex;align-items:center;gap:.5rem;min-height:2.25rem;padding:2px 10px;background:none;border:0;border-radius:999px;color:#fff;font-weight:600;transition:background .2s}
+.exit:hover{background:rgba(255,255,255,.15)}
+
+/* ---------- Player: one big glass panel ---------- */
+.panel{flex-direction:column;gap:.5rem;margin:0 auto .6rem;width:min(1180px,calc(100% - 1.75rem));min-height:0;flex:1;border-radius:var(--r);padding:.8rem 1.2rem;animation:rise .5s var(--ease) both}
+.topline{display:flex;align-items:center;gap:.5rem}
+.ptitle{flex:1;min-width:0;text-align:center;font-size:clamp(1rem,2.8vw,1.5rem);font-weight:600;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stage{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.8fr) minmax(0,1fr);gap:.7rem;align-items:start}
+.left{display:flex;flex-direction:column;gap:.5rem;min-width:0;align-items:center}
+.view{position:relative;width:min(100%,max(15rem,calc((100dvh - var(--reserve)) * 2)));aspect-ratio:2/1;background:#0c1020;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.7)}
+.view canvas{display:block;width:100%;height:100%}
+.view.drop{outline:3px dashed var(--accent);outline-offset:-6px}
+.ph{position:absolute;top:0;bottom:0;left:0;width:2px;background:#fff;box-shadow:0 0 12px 3px rgba(255,255,255,.8);display:none}
+.side{padding:.6rem;display:flex;flex-direction:column;gap:.5rem;min-width:0}
+.pixbox{position:relative;aspect-ratio:2/1;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#0c1020}
+.pixbox canvas{display:block;width:100%;height:100%;image-rendering:pixelated}
+.legendbar{height:.75rem;border-radius:6px;border:1px solid var(--line)}
+.legendticks{display:flex;justify-content:space-between;font-size:.72rem;color:var(--mut);font-variant-numeric:tabular-nums;margin-top:.15rem}
+.legendrange{display:flex;gap:.6rem}
+.legendrange label{display:flex;align-items:center;gap:.4rem;font-size:.8rem;color:var(--mut)}
+.legendrange input,.sheet input{font:inherit;color:#fff;background:rgba(0,0,0,.38);border:1px solid rgba(255,255,255,.35);border-radius:10px}
+.legendrange input{width:4.4rem;padding:.15rem .4rem}
+.read{display:flex;gap:.3rem .9rem;flex-wrap:wrap;font-size:.85rem;font-variant-numeric:tabular-nums}
+.read b{font-weight:600}
+.read .h{color:var(--hot)}.read .w{color:var(--wet)}
+.spectrum{width:100%;padding:.35rem .8rem}
+.spechead{display:flex;justify-content:space-between;font-size:.75rem;color:var(--mut)}
+.srow{display:grid;grid-template-columns:5rem minmax(0,1fr);gap:.6rem;align-items:center;height:1.4rem}
+.slabel{font-size:.78rem;font-weight:600;white-space:nowrap}
+.srow canvas{display:block;width:100%;height:1.25rem}
+.controls{display:flex;flex-wrap:wrap;gap:.5rem .9rem;align-items:center}
+.controls .btn.pri{min-width:5.5rem}
+.slider{display:flex;flex-direction:column;font-size:.78rem;color:var(--mut);flex:1 1 7.5rem;min-width:6rem}
+.slider b{color:#fff;font-weight:600;margin-left:.3rem}
+
+/* ---------- About and Setting sheets ---------- */
+.sheet{max-width:640px;width:calc(100% - 32px);padding:30px 34px;color:#fff;border-radius:var(--r);font-weight:300;max-height:calc(100dvh - 24px);overflow:auto}
+.sheet[open]{animation:pop .3s var(--ease)}
+.sheet::backdrop{background:rgba(2,5,11,.55);-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}
+@keyframes pop{from{opacity:0;transform:translateY(12px) scale(.97)}}
+.sheet h2{text-align:center;font-size:1.7rem;font-weight:600;margin:0 0 .75rem}
+.sheet h2.sub{font-size:1.25rem;margin:1.4rem 0 .5rem}
+.sheet h3{text-align:center;font-size:1.05rem;font-weight:600;margin:.9rem 0 .5rem}
+.sheet p{margin:0 0 .65rem;line-height:1.55}
+.sheet .exit{top:18px;right:20px}
+.seg{display:flex;gap:2px;padding:4px;border-radius:999px;background:rgba(255,255,255,.92)}
+.seg button{flex:1;min-height:2.5rem;padding:4px 8px;border:0;border-radius:999px;background:none;color:#0a1220;font-weight:500;transition:background .25s var(--ease)}
+.seg button:hover{background:rgba(90,169,238,.25)}
+.seg button[aria-checked="true"]{background:var(--accent);font-weight:600}
+.sheet table{width:100%;border-collapse:collapse;min-height:13rem}
+.sheet td{border-top:1px solid var(--line);padding:.35rem 0}
+.sheet td:last-child{text-align:right;padding-left:1rem}
+.pager{display:flex;align-items:center;justify-content:center;gap:1.1rem;margin-top:.9rem}
+.pager .btn{min-width:6rem}
+
+/* ---------- Stars, in the sky only ---------- */
+html::before,html::after{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;-webkit-mask-image:linear-gradient(#000 38%,transparent 76%);mask-image:linear-gradient(#000 38%,transparent 76%)}
+html::before{background-image:radial-gradient(1px 1px at 20px 30px,#fff 50%,transparent),radial-gradient(1px 1px at 90px 70px,#dfe9ff 50%,transparent),radial-gradient(1.5px 1.5px at 150px 120px,#fff 50%,transparent),radial-gradient(1px 1px at 60px 160px,#fff 50%,transparent);
+  background-size:200px 200px,230px 230px,310px 310px,170px 170px;animation:twinkle 5s ease-in-out infinite alternate}
+html::after{background-image:radial-gradient(1px 1px at 40px 100px,#fff 50%,transparent),radial-gradient(2px 2px at 180px 40px,#cfe0ff 50%,transparent),radial-gradient(1px 1px at 110px 190px,#fff 50%,transparent);
+  background-size:260px 260px,370px 370px,190px 190px;animation:twinkle 7s ease-in-out -3s infinite alternate}
+@keyframes twinkle{from{opacity:.55}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}html::before,html::after,.landing,.panel{animation:none!important}}
+@media (forced-colors:active){.ph{border:2px solid CanvasText}}
+
+/* ---------- Phones and narrow windows ---------- */
+@media (max-width:640px){
+  :root{--reserve:42rem}
+  .bar{padding:calc(env(safe-area-inset-top,0px) + .5rem) .75rem .4rem}.bar .logo{width:2.75rem}.bar .btn kbd,.exit kbd{display:none}
+  .carousel{display:contents}
+  .top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"mid mid mid" "prev start next" "note note note";align-items:center;justify-items:center;row-gap:.75rem}
+  .mid{grid-area:mid;width:100%}#prev{grid-area:prev}#next{grid-area:next}#start{grid-area:start}#pNote{grid-area:note}
+  .arrow{width:2.9rem;height:2.9rem}
+  .btn.big{height:3rem;min-width:9.4rem;font-size:1.05rem}
+  .slide h2{margin:1.5rem 0 .6rem}
+  #pDesc{-webkit-line-clamp:3;font-size:.88rem}
+  .panel{width:calc(100% - 1rem);padding:.6rem;margin-bottom:.4rem}
+  .stage{grid-template-columns:1fr;gap:.4rem}
+  .side{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .6rem}
+  .side .pixbox{grid-column:1}.side .cap{display:none}
+  .side .legend,.side .legendrange,.side .read,.side #describe{grid-column:2}
+  .btn{padding:.2rem .8rem;min-height:2.4rem}
+  .controls{gap:.4rem .6rem}.slider{flex-basis:45%}
+  .sheet{padding:18px;font-size:.85rem}.sheet h2{font-size:1.4rem}.sheet p{line-height:1.4}
+  .seg button{font-size:.75rem;padding:4px 2px}.sheet table{min-height:0}.sheet td{padding:.2rem 0;font-size:.8rem}
+}
+/* Short screens (landscape phones): drop what is not essential */
+@media (max-height:560px){
+  :root{--reserve:17rem}
+  .landing .tag{display:none}.landing .logo{width:3.25rem}
+  #pDesc{-webkit-line-clamp:2}.slide h2{margin-bottom:.5rem}
+  .cap,.spechead,.side .cap{display:none}
+  .read{font-size:.75rem}
+  .sheet{padding:14px 22px}.sheet table{min-height:0}.sheet td{padding:.1rem 0}
+}

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Earth Jukebox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="home">
+<a class="skip" href="#main">Skip to the playlist</a>
+
+<header class="bar">
+  <svg class="logo" viewBox="0 0 96 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="48" cy="16" r="11"/><ellipse cx="48" cy="16" rx="5" ry="11"/><path d="M37 16h22M2 16h14l3-6 4 12 4-9 3 3h6M94 16H82l-3-6-4 12-4-9-2 3"/></svg>
+  <button id="aboutBtn" type="button" class="btn pill" aria-keyshortcuts="A">About <kbd>A</kbd></button>
+  <button id="helpBtn" type="button" class="btn pill" aria-keyshortcuts="?"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.8 1.7 1l.4 2.6h4l.4-2.6c.6-.2 1.2-.6 1.7-1l2.5 1 2-3.5zM12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z"/></svg> Setting <kbd>?</kbd></button>
+</header>
+
+<div class="views">
+
+  <!-- ---------- Landing ---------- -->
+  <section id="landing" class="landing" aria-label="Welcome">
+    <svg class="logo" viewBox="0 0 96 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="48" cy="16" r="11"/><ellipse cx="48" cy="16" rx="5" ry="11"/><path d="M37 16h22M2 16h14l3-6 4 12 4-9 3 3h6M94 16H82l-3-6-4 12-4-9-2 3"/></svg>
+    <h1>Earth Jukebox</h1>
+    <p class="tag">NASA Earth data, played as sound.</p>
+    <button id="homeStart" type="button" class="btn pill big">Start</button>
+  </section>
+
+  <!-- ---------- Playlist: one track at a time ---------- -->
+  <main id="main" class="wrap">
+    <div id="top" class="top">
+      <div class="carousel">
+        <button id="prev" type="button" class="arrow" aria-label="Previous track" aria-keyshortcuts="ArrowLeft"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <div class="mid">
+          <section id="blurb" class="blurb slide glass" aria-label="Selected track">
+            <button id="exitMenu" type="button" class="exit" aria-keyshortcuts="Escape"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="10" fill="currentColor"/><path d="M11.5 5.5L7 10l4.5 4.5" stroke="#0a1220" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Exit <kbd>Esc</kbd></button>
+            <h2 id="pTitle">Loading</h2>
+            <div class="gradbox" id="pBar" aria-hidden="true"></div>
+            <div class="legendticks" id="pTicks" aria-hidden="true"></div>
+            <p id="pDesc"></p>
+            <p id="pIdx" aria-live="polite"></p>
+          </section>
+        </div>
+        <button id="next" type="button" class="arrow" aria-label="Next track" aria-keyshortcuts="ArrowRight"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      <button id="start" type="button" class="btn pri pill big" aria-keyshortcuts="Enter"><svg width="20" height="20" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 1.5v11l9-5.5z"/></svg><span>Play</span></button>
+      <p class="cap center" id="pNote"></p>
+    </div>
+  </main>
+
+  <!-- ---------- Player: one glass panel, no scrolling ---------- -->
+  <div id="panel" class="panel">
+    <div class="topline">
+      <button id="tPrev" type="button" class="btn icon" aria-label="Previous track" aria-keyshortcuts="ArrowLeft">&lsaquo;</button>
+      <h2 class="ptitle" id="appTitle">Earth Jukebox</h2>
+      <button id="tNext" type="button" class="btn icon" aria-label="Next track" aria-keyshortcuts="ArrowRight">&rsaquo;</button>
+      <button id="back" type="button" class="btn sm" aria-label="Back to the playlist" aria-keyshortcuts="Escape"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="10" fill="currentColor"/><path d="M11.5 5.5L7 10l4.5 4.5" stroke="#0a1220" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Exit <kbd>Esc</kbd></button>
+    </div>
+
+    <div class="stage">
+      <div class="left">
+        <div class="view" id="viewBox">
+          <canvas id="view" width="640" height="320" role="img" aria-label="Source picture. Press D for a text description."></canvas>
+          <div class="ph" id="ph"></div>
+        </div>
+        <div class="spectrum card" id="spectrum">
+          <div class="spechead"><span>Sounds playing now</span><span id="specHint">Press Play</span></div>
+          <div id="specRows"></div>
+        </div>
+      </div>
+
+      <div class="side card">
+        <div class="pixbox">
+          <canvas id="pix" width="64" height="14" aria-hidden="true"></canvas>
+          <div class="ph" id="ph2"></div>
+        </div>
+        <p class="cap">What the app hears: the frame as a 64 × 14 grid. Each row is a note.</p>
+        <div class="legend">
+          <div class="legendbar" id="legendBar"></div>
+          <div class="legendticks" id="legendTicks"></div>
+        </div>
+        <div class="legendrange" id="legendRange" hidden>
+          <label>Min <input type="number" id="legendMin" step="any" value="0"></label>
+          <label>Max <input type="number" id="legendMax" step="any" value="1"></label>
+        </div>
+        <div class="read">
+          <span class="h"><span id="lh">Warm</span> <b id="rh">0%</b></span>
+          <span class="w"><span id="lw">Cold</span> <b id="rw">0%</b></span>
+          <span><span id="avgLabel">Average</span> <b id="ra">–</b></span>
+          <span>Tempo <b id="rt">0</b> BPM</span>
+        </div>
+        <button id="describe" type="button" class="btn" aria-keyshortcuts="D">Describe <kbd>D</kbd></button>
+      </div>
+    </div>
+
+    <p class="cap" id="cap" aria-live="polite">Press ? for keyboard shortcuts.</p>
+
+    <div class="controls">
+      <button class="btn pri" id="play" type="button" aria-pressed="false" aria-keyshortcuts="Space P">Play</button>
+      <label class="slider">Volume <input type="range" id="vol" min="0" max="1" step="0.01" value="0.7"></label>
+      <label class="slider">Sweep <b id="spO">16 s</b><input type="range" id="speed" min="6" max="40" step="1" value="30"></label>
+      <button class="btn" id="pick" type="button" aria-keyshortcuts="O">Load image or video</button>
+      <button class="btn" id="cam" type="button">Take photo or video</button>
+      <button class="btn" id="legendPick" type="button" aria-keyshortcuts="L">Upload legend</button>
+      <input type="file" id="file" accept="image/*,video/*,.heic,.heif,.mov,.mp4,.webm">
+      <input type="file" id="camFile" accept="image/*,video/*" capture="environment">
+      <input type="file" id="legendFile" accept="image/*">
+    </div>
+  </div>
+</div>
+
+<div class="sr" id="sr" role="status" aria-live="polite"></div>
+
+<dialog id="about" class="sheet" aria-labelledby="aboutT">
+  <button type="button" class="exit" data-close><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="10" fill="currentColor"/><path d="M11.5 5.5L7 10l4.5 4.5" stroke="#0a1220" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Exit <kbd>Esc</kbd></button>
+  <h2 id="aboutT">About</h2>
+  <p>Earth Jukebox turns NASA Earth data video into sound, so heat, cold and pollution can be heard as well as seen.</p>
+  <h3>How it sounds</h3>
+  <p>Each frame is shrunk to a grid of 64 columns and 14 rows, and every pixel is matched to the closest color on the track's legend to recover its value. Each row is a note, with the north high and the south low.</p>
+  <p>A line sweeps from west to east and plays the three columns under it, panned from your left ear to your right. On the temperature map, warm areas play a buzzing pad and cold areas ring like ice. Colors that are not on the legend, such as borders and labels, make no sound, and a quiet drone keeps calm regions from going silent.</p>
+</dialog>
+
+<dialog id="settings" class="sheet" aria-labelledby="setT">
+  <button type="button" class="exit" data-close><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="10" fill="currentColor"/><path d="M11.5 5.5L7 10l4.5 4.5" stroke="#0a1220" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Exit <kbd>Esc</kbd></button>
+  <h2 id="setT">Setting</h2>
+  <h3 id="tsL">Text size <kbd>T</kbd></h3>
+  <div id="sizes" class="seg" role="radiogroup" aria-labelledby="tsL">
+    <button type="button" role="radio" aria-checked="true">Normal</button><button type="button" role="radio" aria-checked="false">Large</button><button type="button" role="radio" aria-checked="false">Extra large</button><button type="button" role="radio" aria-checked="false">Largest</button>
+  </div>
+  <h2 class="sub">Keyboard shortcuts</h2>
+  <div aria-live="polite"><h3 id="kTitle"></h3><table><caption class="sr">Shortcuts</caption><tbody id="kRows"></tbody></table></div>
+  <div class="pager"><button id="kBack" type="button" class="btn pri pill">Back</button><span id="kPage"></span><button id="kNext" type="button" class="btn pri pill">Next</button></div>
+</dialog>
+
+<script src="presets.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
