@@ -9,11 +9,15 @@
 //              Driven by EJ.rowRain / EJ.meanRain, at a tempo that depends on the map (voice.tempoFrom).
 //   • HISS   → filtered noise bed (rain, wind, or a snowy hush), loudness from EJ.meanRain.
 //   • DRONE  → two quiet sines (A + E) so a calm area is never totally silent.
+// Every voice can be muted independently from EJ.layers (set by the Instruments toggle buttons in
+// app.js). The two NOTE layers (EJ.layers.notesWarm / notesCold) are gated earlier, in app.js, by
+// zeroing the row data this file reads — so this file only ever has to care about INSTRUMENTS.
 EJ.audio = (function () {
   var R = EJ.R;
   var ac = null;                       // the AudioContext (created on first Play; browsers need a click first)
   var master, pan, revSend, lowpass, noiseGain;
   var voices = [];                     // one pad voice per row
+  var drones = [];                     // the quiet drone oscillators' gain nodes (toggled by EJ.layers.drone)
   var nextTime = 0;                    // when the next drop step is due
   var A = { playing: false };          // public object; A.playing is read by app.js
 
@@ -63,11 +67,13 @@ EJ.audio = (function () {
       voices.push({ g: g, b: b, a: a }); // keep gain (loudness), oscillator b (detune) and a (wave type)
     }
 
-    // Drone: two quiet sines on A1 and E2.
+    // Drone: two quiet sines on A1 and E2. Kept at a fixed 0.03 level; EJ.layers.drone just
+    // scales that in A.update() below, so toggling it fades smoothly instead of clicking.
     [55, 82.41].forEach(function (f) {
       var o = ac.createOscillator(), g = ac.createGain();
-      o.frequency.value = f; g.gain.value = 0.03;
+      o.frequency.value = f; g.gain.value = 0;
       o.connect(g); g.connect(master); o.start();
+      drones.push(g);
     });
 
     // Noise bed (rain / wind / snow hush): looping white noise → band-pass filter → gain.
@@ -125,9 +131,9 @@ EJ.audio = (function () {
     while (nextTime < ac.currentTime + 0.15) {
       var n = 0; // at most 4 drops per step, to avoid a wall of sound
       for (var r = 0; r < R && n < 4; r++) {
-        var amt = EJ.rowRain[r];
+        var amt = EJ.layers.drops ? EJ.rowRain[r] : 0;
         // Chance of a drop on this row = how strong the drops amount is. Row 0 is the TOP of the
-        // picture = highest note.
+        // picture = highest note. The 'drops' instrument toggle silences this whole branch.
         if (amt > 0 && Math.random() < amt * 0.45) {
           drop(R - 1 - r, nextTime + Math.random() * 0.03, amt); // tiny random offset sounds more natural
           n++;
@@ -161,11 +167,15 @@ EJ.audio = (function () {
     var v = EJ.map().voice, now = ac.currentTime;
     for (var r = 0; r < R; r++) {
       var voice = voices[R - 1 - r];                                    // top row → highest voice
-      voice.g.gain.setTargetAtTime(EJ.rowHeat[r] * 0.05, now, 0.06);    // loudness = pad amount in this row
+      // The 'pad' instrument toggle silences this voice outright, whatever the row's data says.
+      voice.g.gain.setTargetAtTime(EJ.layers.pad ? EJ.rowHeat[r] * 0.05 : 0, now, 0.06);
       voice.b.detune.setTargetAtTime(v.detune[0] + EJ.meanHeat * (v.detune[1] - v.detune[0]), now, 0.1);
     }
     lowpass.frequency.setTargetAtTime(v.cutoff[0] + EJ.meanHeat * (v.cutoff[1] - v.cutoff[0]), now, 0.1);
-    noiseGain.gain.setTargetAtTime(EJ.meanRain * v.hiss, now, 0.15);
+    // The 'noise' instrument toggle silences the rain/wind/hush bed outright.
+    noiseGain.gain.setTargetAtTime(EJ.layers.noise ? EJ.meanRain * v.hiss : 0, now, 0.15);
+    // The 'drone' instrument toggle fades the two background sines in or out.
+    drones.forEach(function (g) { g.gain.setTargetAtTime(EJ.layers.drone ? 0.03 : 0, now, 0.2); });
     pan.pan.setTargetAtTime(pos * 1.6 - 0.8, now, 0.05);                 // left → right
   };
 

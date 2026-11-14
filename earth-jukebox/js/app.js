@@ -1,7 +1,8 @@
 // app.js — the "glue": the main menu, page controls, drawing the picture, and the main loop.
 // Every frame (about 60×/second) the loop does:
 //   1. draw the picture   2. shrink it to a 64×14 grid   3. measure it (analysis.js)
-//   4. pick the row levels to listen to   5. hand them to the audio engine   6. update the display
+//   4. gate it by the NOTE and SCENE layer toggles   5. hand it to the audio engine (which
+//      applies the INSTRUMENT layer toggles itself)   6. update the display
 (function () {
   var C = EJ.C, R = EJ.R, VW = EJ.VW, VH = EJ.VH;
   function $(id) { return document.getElementById(id); }
@@ -15,7 +16,7 @@
   vctx.imageSmoothingQuality = 'high';
 
   // ---------- State ----------
-  var src = { kind: 'scene', i: 0 };            // what we're showing: a built-in scene, or a loaded image/video
+  var src = null;                               // the loaded image or video, or null if nothing is loaded yet
   var objUrl = null;                            // temporary URL of a loaded file
   var region = { x: 0.3, y: 0.25, w: 0.4, h: 0.5 }; // chosen area as fractions (0..1) of the picture
   var t0 = 0;                                   // time when Play was pressed (for the sweep position)
@@ -24,9 +25,14 @@
   function isArea() { return $('mode').value === 'area'; }
 
   // ---------- Draw the picture ----------
-  function paint(t) {
-    if (src.kind === 'scene') { EJ.paintScene(vctx, src.i, t); return; }
-    // A loaded image or video: fit it inside the canvas without stretching it.
+  function paint() {
+    if (!src) { // nothing loaded yet: a plain placeholder, which reads as "no data" (not on any legend)
+      vctx.fillStyle = '#20242f'; vctx.fillRect(0, 0, VW, VH);
+      vctx.fillStyle = '#7b8196'; vctx.font = '18px sans-serif'; vctx.textAlign = 'center';
+      vctx.fillText('Load a picture or video to begin', VW / 2, VH / 2);
+      return;
+    }
+    // Fit the image or video inside the canvas without stretching it.
     vctx.fillStyle = '#8c8c8c'; vctx.fillRect(0, 0, VW, VH); // neutral grey bars: not on any legend, so they stay silent
     var el = src.el, iw = el.videoWidth || el.naturalWidth, ih = el.videoHeight || el.naturalHeight;
     if (!iw || !ih) return;
@@ -36,8 +42,8 @@
 
   // ---------- Main loop ----------
   function frame(ts) {
-    var t = ts / 1000, r;
-    paint(t);
+    var r;
+    paint();
 
     // Shrink the picture (or just the chosen area) onto the 64×14 grid, then measure it.
     if (isArea()) sctx.drawImage(view, region.x * VW, region.y * VH, region.w * VW, region.h * VH, 0, 0, C, R);
@@ -50,6 +56,14 @@
                    : (playing ? (((ts - t0) / 1000 / parseFloat($('dur').value)) % 1) : 0);
     EJ.columnLevels(area, Math.min(C - 1, Math.floor(pos * C)));
 
+    // ---- NOTE and SCENE layer gating ----
+    // Keep the true, un-muted amounts for the readout (so the numbers always reflect the real
+    // picture), then zero out whatever is toggled off before the audio engine ever sees it.
+    EJ.meanHeatRaw = EJ.meanHeat; EJ.meanRainRaw = EJ.meanRain;
+    var warmOn = EJ.layers.scene && EJ.layers.notesWarm, coldOn = EJ.layers.scene && EJ.layers.notesCold;
+    if (!warmOn) { EJ.meanHeat = 0; for (r = 0; r < R; r++) EJ.rowHeat[r] = 0; }
+    if (!coldOn) { EJ.meanRain = 0; for (r = 0; r < R; r++) EJ.rowRain[r] = 0; }
+
     // Tempo range and source (heat or rain) come from the selected map type (maps.js).
     var v = EJ.map().voice, drive = v.tempoFrom === 'rain' ? EJ.meanRain : EJ.meanHeat;
     EJ.tempo = v.tempo[0] + drive * (v.tempo[1] - v.tempo[0]);
@@ -61,7 +75,8 @@
     $('ph2').style.display = on ? 'block' : 'none';
     if (on) { $('ph').style.left = $('ph2').style.left = (pos * 100) + '%'; }
 
-    // Bar meter: warm bar = pad amount in that row, blue bar = drops amount in that row.
+    // Bar meter: warm bar = pad amount in that row, blue bar = drops amount in that row (post-gating,
+    // so a muted layer visibly goes flat here too).
     mctx.clearRect(0, 0, 56, VH);
     if (playing) {
       var rh = VH / R;
@@ -71,34 +86,16 @@
       }
     }
 
-    // Update the text readout every 6th frame (no need to do it more often).
+    // Update the text readout every 6th frame (no need to do it more often). Uses the RAW amounts,
+    // so it always shows the true picture data even while a layer is muted.
     if (++frameCount % 6 === 0) {
       var m = EJ.map();
-      $('rh').textContent = Math.round(EJ.meanHeat * 100) + '%';
-      $('rw').textContent = Math.round(EJ.meanRain * 100) + '%';
+      $('rh').textContent = Math.round(EJ.meanHeatRaw * 100) + '%';
+      $('rw').textContent = Math.round(EJ.meanRainRaw * 100) + '%';
       $('rt').textContent = Math.round(EJ.tempo);
       $('ra').textContent = (EJ.meanValue === null || !m.fmt) ? '–' : m.fmt(EJ.meanValue);
     }
     requestAnimationFrame(frame);
-  }
-
-  // ---------- Scene buttons ----------
-  var box = $('scenes');
-  function showScene(i) { // switch to built-in scene number i of the current map type
-    src = { kind: 'scene', i: i };
-    Array.prototype.forEach.call(box.children, function (x, j) { x.setAttribute('aria-pressed', j === i ? 'true' : 'false'); });
-    $('cap').textContent = EJ.scenes()[i].d;
-  }
-  function buildSceneButtons(show) { // (re)create one button per scene of the current map type
-    box.innerHTML = '';
-    EJ.scenes().forEach(function (s, i) {
-      var b = document.createElement('button');
-      b.textContent = s.n;
-      b.setAttribute('aria-pressed', 'false');
-      b.onclick = function () { showScene(i); };
-      box.appendChild(b);
-    });
-    if (show) showScene(0);
   }
 
   // ---------- Loading your own image or video ----------
@@ -107,10 +104,10 @@
     if (objUrl) URL.revokeObjectURL(objUrl);
     objUrl = URL.createObjectURL(f);
     function use(kind, el) { // switch the picture to the loaded file
-      src = { kind: kind, el: el };
-      Array.prototype.forEach.call(box.children, function (x) { x.setAttribute('aria-pressed', 'false'); });
+      src = { kind: kind, el: el, name: f.name };
+      updateStatus();
       var m = EJ.map();
-      $('cap').textContent = 'Your frame: ' + f.name + (m.legend
+      $('cap').textContent = 'Source: ' + f.name + (m.legend
         ? '. Colors are matched to the ' + m.name.toLowerCase() + ' legend.'
         : '. Warm colors play as heat, blue as rain.');
     }
@@ -198,15 +195,17 @@
       EJ.audio.stop();
       b.textContent = 'Play'; b.setAttribute('aria-pressed', 'false');
     }
+    updateStatus();
   };
   $('vol').oninput = function () { EJ.audio.setVolume(parseFloat($('vol').value)); };
   $('dur').oninput = function () { $('durO').textContent = $('dur').value + ' s'; t0 = performance.now(); };
 
-  // ---------- Map type: applies one entry from EJ.MAPS (maps.js) to the whole page ----------
-  function applyMapType(id, resetScene) {
+  // ---------- Map type: applies one entry from EJ.MAPS (maps.js, or a custom upload) to the page ----------
+  function applyMapType(id) {
     EJ.dataType = id;
     var m = EJ.map();
     $('dtype').value = id;
+    $('appTitle').textContent = m.name;
     $('lh').textContent = m.labels[0];
     $('lw').textContent = m.labels[1];
     $('avgLabel').textContent = m.avg;
@@ -217,19 +216,66 @@
       $('legendTicks').innerHTML = m.ticks.map(function (s) { return '<span>' + s + '</span>'; }).join('');
     }
     EJ.audio.applyVoice(); // switch the pad wave and reverb to match, even if already playing
-    // Built-in scenes belong to one map type, so go back to that type's first scene.
-    // A loaded image or video stays as it is.
-    buildSceneButtons(resetScene);
+    updateStatus();
   }
-  $('dtype').onchange = function () { applyMapType(this.value, true); };
+  $('dtype').onchange = function () { applyMapType(this.value); };
 
-  // ---------- Main menu: a card per map type, built from EJ.MAPS so it stays in sync ----------
+  // ---------- Layer toggle buttons (Notes / Instruments / Scene) ----------
+  // Each button is wired to one flag in EJ.layers (config.js). Clicking flips the flag, restyles
+  // the button, and refreshes the status line below the panel.
+  var TOGGLES = [
+    { key: 'notesWarm', label: 'Warm', group: 'notes' },
+    { key: 'notesCold', label: 'Cold', group: 'notes' },
+    { key: 'pad', label: 'Pad', group: 'instruments' },
+    { key: 'drops', label: 'Drops', group: 'instruments' },
+    { key: 'noise', label: 'Noise bed', group: 'instruments' },
+    { key: 'drone', label: 'Drone', group: 'instruments' },
+    { key: 'scene', label: 'Scene', group: 'scene' }
+  ];
+  function buildToggles() {
+    ['notes', 'instruments', 'scene'].forEach(function (group) {
+      var box = $('toggles-' + group);
+      box.innerHTML = '';
+      TOGGLES.filter(function (t) { return t.group === group; }).forEach(function (t) {
+        var b = document.createElement('button');
+        b.textContent = t.label;
+        b.setAttribute('aria-pressed', EJ.layers[t.key] ? 'true' : 'false');
+        b.onclick = function () {
+          EJ.layers[t.key] = !EJ.layers[t.key];
+          b.setAttribute('aria-pressed', EJ.layers[t.key] ? 'true' : 'false');
+          updateStatus();
+        };
+        box.appendChild(b);
+      });
+    });
+  }
+
+  // Writes the "what's actually sounding right now" line under the toggle buttons.
+  function updateStatus() {
+    var on = function (keys) { return TOGGLES.filter(function (t) { return keys.indexOf(t.key) > -1 && EJ.layers[t.key]; }).map(function (t) { return t.label; }); };
+    var notes = on(['notesWarm', 'notesCold']);
+    var instruments = on(['pad', 'drops', 'noise', 'drone']);
+    var v = EJ.map().voice;
+    var instrumentNames = instruments.map(function (label) {
+      if (label === 'Pad') return 'Pad (' + v.pad + ')';
+      if (label === 'Drops') return 'Drops (' + (v.chime === 'ice' ? 'ice chime' : 'drip') + ')';
+      return label;
+    });
+    var sceneText = !EJ.layers.scene ? 'muted' : (src ? src.name : 'no source loaded');
+    $('statusNotes').textContent = notes.length ? notes.join(', ') : 'none (silent but for the drone)';
+    $('statusInstruments').textContent = instrumentNames.length ? instrumentNames.join(', ') : 'none';
+    $('statusScene').textContent = EJ.map().name + ' — ' + sceneText + (EJ.audio.playing ? '' : ' (stopped)');
+  }
+
+  // ---------- Main menu: a card per map type, built from EJ.MAP_ORDER so it stays in sync ----------
   var menu = $('menu'), menuCards = $('menuCards'), appEl = $('app');
-  function buildMenu() {
-    // Fill the "Map type" dropdown inside the app too, so it always lists exactly the same maps.
+  function fillDtypeOptions() {
     $('dtype').innerHTML = EJ.MAP_ORDER.map(function (id) {
       return '<option value="' + id + '">' + EJ.MAPS[id].name + '</option>';
     }).join('');
+  }
+  function buildMenu() {
+    fillDtypeOptions(); // the dropdown inside the app always lists exactly the same maps as the menu
     menuCards.innerHTML = '';
     EJ.MAP_ORDER.forEach(function (id) {
       var m = EJ.MAPS[id], card = document.createElement('button');
@@ -241,8 +287,7 @@
     });
   }
   function openApp(id) {
-    applyMapType(id, true);
-    $('appTitle').textContent = EJ.map().name;
+    applyMapType(id);
     menu.style.display = 'none';
     appEl.style.display = '';
     if (!frame.started) { frame.started = true; requestAnimationFrame(frame); } // start the loop only once
@@ -253,6 +298,10 @@
     menu.style.display = '';
   };
 
+  // Exposed so legend-upload.js can add a new map type on the fly and jump straight to it.
+  EJ.ui = { refreshMenu: buildMenu, open: openApp, updateStatus: updateStatus };
+
+  buildToggles();
   buildMenu();
   showSel();
 })();
