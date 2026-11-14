@@ -1,702 +1,674 @@
-/* ============================================================
-   EARTH JUKEBOX: app.js
-   Regions: 1 state, 2 helpers, 3 legends, 4 video loading,
-   5 frame analysis, 6 audio, 7 description, 8 drawing,
-   9 playback, 10 menu + upload, 11 page controls
-
-   TWO WAYS TO LISTEN (both read the CURRENT video frame, so sound and picture always match):
-   - One place: every 250 ms the colour at the spot becomes a note. Pitch = value, loudness = value,
-     left/right ear = west/east. It lasts exactly as long as the video.
-   - Whole map: a west-to-east sweep, but each column is read from the frame on screen right now.
-   ============================================================ */
+// app.js — everything except the track list (presets.js).
+// Order inside this file: 1 legends, 2 maps, 3 legend reading, 4 analysis + sweep, 5 audio, 6 spectrum, 7 page.
+window.EJ = window.EJ || {};
 (function () {
-"use strict";
-var C = window.CONFIG, A = C.analysis;
-var $ = function (id) { return document.getElementById(id); };
+  'use strict';
+  var C = 64, R = 14, VW = 640, VH = 320;           // 64 columns × 14 rows; each ROW is one note
+  function cl(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function $(id) { return document.getElementById(id); }
+  EJ.dataType = 'temp';
 
-var SWEEP_MS = C.sweepMs || 4000;
-var MAX_PER_COL = C.maxNotesPerColumn || 2;
-var LOW_MIDI = C.lowMidi || 48;
-var OCTAVES = C.octaves || 3;
-var ANNOUNCE = C.announceEveryBeats || 4;
-var LI = C.listen || {};
-var PAN = LI.panWidth != null ? LI.panWidth : 0.9;
-var LOUD = LI.loudness || [0.1, 0.45];
-var REVERB = LI.reverb != null ? LI.reverb : 0.12;
-var SPOT_MS = C.spotMs || 250, SPOT_DEG = C.spotDeg || 12, SPOT_STEP = C.spotStep || 5;
-var PLACES = C.places || [];
-var FULL = { x: 0, y: 0, w: 1, h: 1 };
-var PLAY = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M3 1.5v11l9-5.5z"/></svg> Play';
-var PAUSE = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M3 1.5h3v11H3zM8 1.5h3v11H8z"/></svg> Pause';
-var ITEMS = C.presets.concat([C.upload || { name: "Upload your own", description: "", videoUrl: "", legends: [] }]);
+  // ================= 1. Legends: [value, r, g, b] per colour =================
+  // temp = NASA T2M near-surface temperature, -40 to 40 °C, a smooth gradient (grey stays "no data").
+  EJ.LEGENDS = { temp: { lo: -40, hi: 40, discrete: false, colors: [
+    [-40,40,46,89],[-38,66,72,127],[-36,101,113,171],[-34,129,147,197],[-32,146,169,210],[-30,176,202,228],[-28,200,222,235],
+    [-26,223,230,237],[-24,225,212,226],[-22,194,148,188],[-20,183,111,171],[-18,147,56,138],[-16,116,37,129],[-14,88,32,132],
+    [-12,63,29,133],[-10,44,43,145],[-8,12,32,164],[-6,11,48,212],[-4,32,73,230],[-2,62,119,232],[0,105,179,234],[2,129,221,229],
+    [4,143,236,205],[6,158,236,167],[8,185,236,120],[10,211,237,93],[12,233,230,74],[14,227,194,62],[16,221,159,53],[18,215,119,43],
+    [20,209,80,41],[22,201,56,29],[24,167,43,21],[26,135,33,15],[28,103,22,9],[30,81,16,6],[32,68,12,4],[34,56,9,3],[36,51,7,2],
+    [38,49,6,1],[40,49,6,1] ] } };
 
-/* ===== REGION 1: STATE ===== */
-var S = {
-  video: $("video"), legends: [], crop: FULL,
-  ac: null, ax: null, aw: 0, ah: 0, data: null,
-  ctx: null, master: null, bus: null,
-  timer: null, beat: 0, col: 0, ticks: 0, series: [], tiles: null, sample: null, loaded: false,
-  wetMin: A.wetMin, active: null, mode: String(LI.mode || "cycle"), invert: !!LI.invertPitch,
-  target: LI.view === "map" ? "map" : "spot", spot: null,
-  view: "menu", idx: 0, accent: null, busy: false, formOpen: false, warn: ""
-};
-
-/* ===== REGION 2: HELPERS ===== */
-function say(t) { $("live").textContent = t; $("liveVis").textContent = t; }
-function proxied(url) { return C.proxyPath + encodeURIComponent(url); }
-function midiToHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
-function dist2(r, g, b, c) { var x = r - c[0], y = g - c[1], z = b - c[2]; return x * x + y * y + z * z; }
-function isUpload() { return S.idx === ITEMS.length - 1; }
-function wetTile(t) { return t.value !== null && t.norm !== undefined; }
-function fmt(v) { return String(+v.toFixed(Math.abs(v) < 10 ? 2 : 1)); }
-function colorAt(en, t) { var e = en[Math.min(en.length - 1, Math.round(t * (en.length - 1)))]; return "rgb(" + e.r + "," + e.g + "," + e.b + ")"; }
-function placeCopy(i) { var p = PLACES[i] || { name: "Equator", lat: 0, lon: 0 }; return { name: p.name, lat: p.lat, lon: p.lon }; }
-S.spot = placeCopy(0);
-function lonText(col) {
-  var lon = -180 + (col + 0.5) / C.grid.cols * 360;
-  return Math.round(Math.abs(lon)) + " degrees " + (lon < 0 ? "west" : "east");
-}
-function spotWhere() {
-  var s = S.spot;
-  return Math.abs(Math.round(s.lat)) + " degrees " + (s.lat < 0 ? "south" : "north") + ", " + Math.abs(Math.round(s.lon)) + " degrees " + (s.lon < 0 ? "west" : "east");
-}
-function legendFor(t) { return S.legends.filter(function (L) { return L.spec.type === t.type; })[0] || S.legends[0]; }
-
-/* ===== REGION 3: LEGENDS (colour bar image -> list of colour/value pairs) ===== */
-function loadImage(url, viaProxy) {
-  return new Promise(function (ok, no) {
-    var im = new Image();
-    im.crossOrigin = "anonymous";
-    im.onload = function () { ok(im); };
-    im.onerror = function () { no(new Error("Legend image failed: " + url)); };
-    im.src = viaProxy ? proxied(url) : url;
-  });
-}
-function findBar(d, w, h) {
-  var rc = new Array(h).fill(0), cc = new Array(w).fill(0), x, y, p, mx, mn;
-  for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
-    p = (y * w + x) * 4; if (d[p + 3] < 200) continue;
-    mx = Math.max(d[p], d[p + 1], d[p + 2]); mn = Math.min(d[p], d[p + 1], d[p + 2]);
-    if (mx - mn > 30) { rc[y]++; cc[x]++; }
-  }
-  var rm = Math.max.apply(null, rc), cm = Math.max.apply(null, cc);
-  if (!rm) return null;
-  var bb = { x0: w, x1: 0, y0: h, y1: 0 };
-  for (y = 0; y < h; y++) if (rc[y] >= rm * 0.3) { bb.y0 = Math.min(bb.y0, y); bb.y1 = Math.max(bb.y1, y); }
-  for (x = 0; x < w; x++) if (cc[x] >= cm * 0.3) { bb.x0 = Math.min(bb.x0, x); bb.x1 = Math.max(bb.x1, x); }
-  return bb;
-}
-async function decodeLegend(spec) {
-  var im;
-  try { im = await loadImage(spec.url, false); } catch (e) { im = await loadImage(spec.url, true); }
-  var cr = spec.crop || FULL;
-  var w = Math.max(1, Math.round(cr.w * im.naturalWidth)), h = Math.max(1, Math.round(cr.h * im.naturalHeight));
-  var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-  var cx = cv.getContext("2d", { willReadFrequently: true });
-  cx.drawImage(im, cr.x * im.naturalWidth, cr.y * im.naturalHeight, w, h, 0, 0, w, h);
-  var d = cx.getImageData(0, 0, w, h).data;
-  var vertical = spec.orientation.indexOf("vertical") === 0;
-  var flip = /lowright|lowtop/.test(spec.orientation);
-  var bb = findBar(d, w, h) || { x0: 0, x1: w - 1, y0: 0, y1: h - 1 }, entries = [], N = 128;
-  for (var i = 0; i < N; i++) {
-    var t = i / (N - 1), x, y;
-    if (vertical) { x = Math.floor((bb.x0 + bb.x1) / 2); y = Math.round(bb.y0 + (flip ? t : 1 - t) * (bb.y1 - bb.y0)); }
-    else { y = Math.floor((bb.y0 + bb.y1) / 2); x = Math.round(bb.x0 + (flip ? 1 - t : t) * (bb.x1 - bb.x0)); }
-    var p = (y * w + x) * 4;
-    if (d[p + 3] < 200) continue;
-    var value = spec.scale === "log" ? spec.min * Math.pow(spec.max / spec.min, t) : spec.min + (spec.max - spec.min) * t;
-    entries.push({ r: d[p], g: d[p + 1], b: d[p + 2], t: t, value: value });
-  }
-  entries = entries.filter(function (e, i) {
-    var a = entries[i - 1], b = entries[i + 1], far = function (o) { return !o || dist2(e.r, e.g, e.b, [o.r, o.g, o.b]) > 2500; };
-    return !(far(a) && far(b));
-  });
-  if (!entries.length) throw new Error("No color found in legend: " + spec.label);
-  return { spec: spec, entries: entries, src: im.src };
-}
-function showLegends() {
-  var box = $("legendView"); box.innerHTML = "";
-  S.legends.forEach(function (L) {
-    var p = document.createElement("p");
-    p.textContent = L.spec.label + ": " + L.spec.min + " to " + L.spec.max + ", " + L.spec.scale + " scale.";
-    var cv = document.createElement("canvas"); cv.className = "strip"; cv.width = 512; cv.height = 24;
-    cv.setAttribute("role", "img"); cv.setAttribute("aria-label", "Decoded color bar for " + L.spec.label);
-    var g = cv.getContext("2d");
-    L.entries.forEach(function (e) { g.fillStyle = "rgb(" + e.r + "," + e.g + "," + e.b + ")"; g.fillRect(e.t * 508, 0, 6, 24); });
-    var img = document.createElement("img"); img.className = "orig"; img.src = L.src; img.alt = "Original legend image for " + L.spec.label;
-    box.appendChild(p); box.appendChild(img); box.appendChild(cv);
-  });
-  if (S.warn) { var w = document.createElement("p"); w.textContent = S.warn; box.appendChild(w); }
-}
-function legendOverlap() {
-  var out = [];
-  for (var i = 1; i < S.legends.length; i++) for (var j = 0; j < i; j++) {
-    var a = S.legends[j].entries, n = 0, b = S.legends[i].entries;
-    b.forEach(function (e) { for (var k = 0; k < a.length; k++) if (dist2(e.r, e.g, e.b, [a[k].r, a[k].g, a[k].b]) < 225) { n++; break; } });
-    if (n / b.length > 0.3) out.push("Warning: " + Math.round(n / b.length * 100) + " percent of the colors in " + S.legends[i].spec.label + " are almost the same as " + S.legends[j].spec.label + ", so those pixels count as " + S.legends[j].spec.label + ".");
-  }
-  return out.join(" ");
-}
-
-/* ===== REGION 4: VIDEO LOADING ===== */
-function tryVideo(src, cors) {
-  return new Promise(function (ok, no) {
-    var v = S.video;
-    function clean() { v.removeEventListener("loadeddata", good); v.removeEventListener("error", bad); }
-    function good() { clean(); ok(); }
-    function bad() { clean(); no(new Error("video failed")); }
-    v.addEventListener("loadeddata", good); v.addEventListener("error", bad);
-    if (cors) v.crossOrigin = "anonymous"; else v.removeAttribute("crossorigin");
-    v.src = src; v.load();
-  });
-}
-function probe() {
-  var c = document.createElement("canvas"); c.width = c.height = 1;
-  var x = c.getContext("2d"); x.drawImage(S.video, 0, 0, 1, 1); x.getImageData(0, 0, 1, 1);
-}
-async function loadVideo(url, isLocal) {
-  if (isLocal) { await tryVideo(url, false); return; }
-  try { await tryVideo(url, true); probe(); }
-  catch (e) { await tryVideo(proxied(url), true); probe(); }
-}
-
-/* ===== REGION 5: FRAME ANALYSIS =====
-   Tile value: null = no data, {value:0, no norm} = dry, otherwise a value from the legend. */
-function matchColor(r, g, b) {
-  for (var i = 0; i < S.legends.length; i++) {
-    var L = S.legends[i], tol = L.spec.tolerance || A.maxColorDistance, bd = tol * tol, best = null;
-    for (var k = 0; k < L.entries.length; k++) {
-      var e = L.entries[k], d = dist2(r, g, b, [e.r, e.g, e.b]);
-      if (d <= bd) { bd = d; best = e; }
-    }
-    if (best) return { e: best, type: L.spec.type };
-  }
-  return null;
-}
-function prepAnalysis() {
-  var v = S.video, cr = S.crop;
-  S.aw = A.width;
-  S.ah = Math.max(1, Math.round(A.width * (v.videoHeight * cr.h) / (v.videoWidth * cr.w)));
-  S.ac = document.createElement("canvas"); S.ac.width = S.aw; S.ac.height = S.ah;
-  S.ax = S.ac.getContext("2d", { willReadFrequently: true });
-}
-/* Read one rectangle of the analysed frame (x0,y0,w,h in analysis pixels) with an n x n sample grid. */
-function measure(d, x0, y0, w, h, n) {
-  var wet = 0, dry = 0, sv = 0, st = 0, sr = 0, sg = 0, sb = 0, types = {};
-  for (var j = 0; j < n; j++) for (var i = 0; i < n; i++) {
-    var x = Math.min(S.aw - 1, Math.max(0, Math.floor(x0 + (i + 0.5) / n * w)));
-    var y = Math.min(S.ah - 1, Math.max(0, Math.floor(y0 + (j + 0.5) / n * h)));
-    var p = (y * S.aw + x) * 4, R = d[p], G = d[p + 1], B = d[p + 2];
-    if (d[p + 3] < 10) continue;
-    if (A.noDataColor && dist2(R, G, B, A.noDataColor) < A.dryTolerance * A.dryTolerance) continue;
-    if (A.dryColor && dist2(R, G, B, A.dryColor) < A.dryTolerance * A.dryTolerance) { dry++; continue; }
-    var m = matchColor(R, G, B);
-    if (!m) continue;
-    if (m.e.value < S.wetMin) { dry++; continue; }
-    wet++; sv += m.e.value; st += m.e.t; sr += m.e.r; sg += m.e.g; sb += m.e.b;
-    types[m.type] = (types[m.type] || 0) + 1;
-  }
-  var valid = wet + dry;
-  if (valid / (n * n) < A.minCoverage) return { value: null };
-  if (!wet) return { value: 0 };
-  var top = Object.keys(types).sort(function (a, b) { return types[b] - types[a]; })[0];
-  return { value: sv / wet, norm: st / wet, type: top, wetFrac: wet / valid,
-           color: [Math.round(sr / wet), Math.round(sg / wet), Math.round(sb / wet)] };
-}
-function analyze() {
-  var v = S.video, cr = S.crop, cols = C.grid.cols, rows = C.grid.rows, n = A.samplesPerTile;
-  S.ax.drawImage(v, cr.x * v.videoWidth, cr.y * v.videoHeight, cr.w * v.videoWidth, cr.h * v.videoHeight, 0, 0, S.aw, S.ah);
-  var d = S.data = S.ax.getImageData(0, 0, S.aw, S.ah).data, tw = S.aw / cols, th = S.ah / rows, tiles = [];
-  for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) {
-    var tile = measure(d, c * tw, r * th, tw, th, n);
-    tile.col = c; tile.row = r; tiles.push(tile);
-  }
-  return tiles;
-}
-/* The listening spot, read at full detail from the frame analyze() just drew. */
-function sampleSpot() {
-  var s = S.spot, pw = SPOT_DEG / 360 * S.aw, ph = SPOT_DEG / 180 * S.ah;
-  var cx = (s.lon + 180) / 360 * S.aw, cy = (90 - s.lat) / 180 * S.ah;
-  return measure(S.data, cx - pw / 2, cy - ph / 2, pw, ph, 8);
-}
-
-/* ===== REGION 6: AUDIO ===== */
-function initAudio() {
-  if (S.ctx) { S.ctx.resume(); return; }
-  var ctx = S.ctx = new (window.AudioContext || window.webkitAudioContext)();
-  var comp = ctx.createDynamicsCompressor();
-  S.master = ctx.createGain(); S.master.gain.value = parseFloat($("volume").value);
-  S.master.connect(comp); comp.connect(ctx.destination);
-  var conv = ctx.createConvolver(), len = ctx.sampleRate * 1.2, buf = ctx.createBuffer(2, len, ctx.sampleRate);
-  for (var ch = 0; ch < 2; ch++) { var a = buf.getChannelData(ch); for (var k = 0; k < len; k++) a[k] = (Math.random() * 2 - 1) * Math.pow(1 - k / len, 3); }
-  conv.buffer = buf; var wet = ctx.createGain(); wet.gain.value = REVERB;
-  S.conv = conv; conv.connect(wet); wet.connect(S.master); newBus();
-}
-function newBus() {
-  var old = S.bus;
-  if (old) { old.gain.setTargetAtTime(0, S.ctx.currentTime, 0.02); setTimeout(function () { old.disconnect(); }, 250); }
-  S.bus = S.ctx.createGain(); S.bus.connect(S.master); S.bus.connect(S.conv);
-}
-function envelope(g, t, peak, dur) {
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-}
-function voice(freq, t, kind, vol, pan) {
-  var ctx = S.ctx, g = ctx.createGain(), pn = ctx.createStereoPanner();
-  pn.pan.value = pan; g.connect(pn); pn.connect(S.bus);
-  if (kind === "bell") {
-    [[1, 1], [2.76, 0.35], [5.4, 0.15]].forEach(function (pr) {
-      var o = ctx.createOscillator(), pg = ctx.createGain();
-      o.type = "sine"; o.frequency.value = freq * pr[0]; pg.gain.value = pr[1];
-      o.connect(pg); pg.connect(g); o.start(t); o.stop(t + 1.2);
+  // Value → [r,g,b]. Smooth legends blend neighbours; stepped ones return the step colour.
+  EJ.legendColor = function (name, v) {
+    var L = EJ.LEGENDS[name], c = L.colors, n = c.length, u = cl((v - L.lo) / (L.hi - L.lo)), a, b, f, i;
+    if (L.discrete) { a = c[Math.min(n - 1, Math.floor(u * n))]; return [a[1], a[2], a[3]]; }
+    f = u * (n - 1); i = Math.min(n - 2, Math.floor(f)); f -= i; a = c[i]; b = c[i + 1];
+    return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+  };
+  // Colour → value of the closest legend colour, or null when nothing is close (borders, labels, grey bars: silent).
+  EJ.legendMatch = function (name, r, g, b) {
+    var L = EJ.LEGENDS[name], c = L.colors, best = 1e9, bi = 0, i, dr, dg, db, d, t = L.tol || 50;
+    for (i = 0; i < c.length; i++) { dr = r - c[i][1]; dg = g - c[i][2]; db = b - c[i][3]; d = dr * dr + dg * dg + db * db; if (d < best) { best = d; bi = i; } }
+    return best > t * t ? null : c[bi][0];
+  };
+  // CSS gradient of a legend (menu preview and the strip in the player).
+  EJ.legendCss = function (name) {
+    var L = EJ.LEGENDS[name], c = L.colors, n = c.length, s = [];
+    function rgb(e) { return 'rgb(' + e[1] + ',' + e[2] + ',' + e[3] + ')'; }
+    c.forEach(function (e, i) {
+      if (L.discrete) s.push(rgb(e) + ' ' + (i / n * 100) + '%', rgb(e) + ' ' + ((i + 1) / n * 100) + '%');
+      else s.push(rgb(e) + ' ' + (i / (n - 1) * 100) + '%');
     });
-    envelope(g, t, vol, 1.0);
-  } else {
-    var o = ctx.createOscillator(), f = ctx.createBiquadFilter();
-    o.type = "triangle"; o.frequency.value = freq; f.type = "lowpass";
-    f.frequency.setValueAtTime(freq * 6, t); f.frequency.exponentialRampToValueAtTime(freq * 1.5, t + 0.3);
-    o.connect(f); f.connect(g); o.start(t); o.stop(t + 0.5);
-    envelope(g, t, vol, 0.4);
-  }
-}
-function noteFor(k) {
-  var len = C.scale.length * OCTAVES; k = Math.max(0, Math.min(len - 1, k));
-  return LOW_MIDI + 12 * Math.floor(k / C.scale.length) + C.scale[k % C.scale.length];
-}
-/* Whole-map view: row -> pitch (north high). */
-function pitchFor(row) {
-  var rows = C.grid.rows, len = C.scale.length * OCTAVES;
-  return noteFor(Math.round((S.invert ? row : rows - 1 - row) / (rows - 1) * (len - 1)));
-}
-/* One-place view: value position on the legend (0..1) -> pitch. */
-function pitchForNorm(t) {
-  if (S.invert) t = 1 - t;
-  return noteFor(Math.round(t * (C.scale.length * OCTAVES - 1)));
-}
-function inBand(r) { var b = S.active; return !b || (r >= b.rowStart && r < b.rowEnd); }
-function glow(t) {
-  var s = document.documentElement.style;
-  if (t && t.color) { s.setProperty("--pulse", "rgb(" + t.color.join(",") + ")"); s.setProperty("--pi", Math.max(0.25, t.norm)); }
-  else s.setProperty("--pi", 0);
-}
-function pulseOff() { glow(null); }
-function playSample(t, when) {
-  if (!t || !wetTile(t)) return;                    // no data or no signal: a rest
-  var kind = C.timbres[t.type] || C.timbres["default"];
-  voice(midiToHz(pitchForNorm(t.norm)), when, kind, LOUD[0] + (LOUD[1] - LOUD[0]) * t.norm, S.spot.lon / 180 * PAN);
-}
-function soundKey() {
-  initAudio();
-  var t = S.ctx.currentTime + 0.05, i, n = 8;
-  if (S.target === "spot") {
-    for (i = 0; i < n; i++) voice(midiToHz(pitchForNorm(i / (n - 1))), t + i * 0.3, "pluck", 0.25, 0);
-    var t2 = t + n * 0.3 + 0.4;
-    voice(midiToHz(pitchForNorm(0.5)), t2, "pluck", 0.1, 0);
-    voice(midiToHz(pitchForNorm(0.5)), t2 + 0.6, "pluck", 0.45, 0);
-    say("Sound key. Eight plucked notes from the lowest value on the legend to the highest." + (S.invert ? " Pitch is flipped: higher values are lower notes." : " Higher values are higher notes.") +
-      " Then a quiet and a loud note: louder means a stronger value. A silence means no data or no signal. Sound in your left ear is west, right ear is east.");
-  } else {
-    for (i = C.grid.rows - 1; i >= 0; i--) voice(midiToHz(pitchFor(i)), t + (C.grid.rows - 1 - i) * 0.3, "pluck", 0.25, 0);
-    var t3 = t + C.grid.rows * 0.3 + 0.4;
-    voice(midiToHz(pitchFor(4)), t3, "pluck", 0.1, 0);
-    voice(midiToHz(pitchFor(4)), t3 + 0.6, "pluck", 0.45, 0);
-    voice(midiToHz(pitchFor(4)), t3 + 1.4, "bell", 0.3, 0);
-    say("Sound key. First, plucked notes rising from south to north, low to high. Then a quiet pluck for a weak value, a loud pluck for a strong value, and a bell for snow.");
-  }
-}
+    return 'linear-gradient(to right,' + s.join(',') + ')';
+  };
 
-/* ===== REGION 7: DESCRIPTION ===== */
-function bandText(b, tiles) {
-  var cols = C.grid.cols, valid = 0, wet = [], types = {};
-  for (var r = b.rowStart; r < b.rowEnd; r++) for (var c = 0; c < cols; c++) {
-    var t = tiles[r * cols + c];
-    if (t.value === null) continue; valid++;
-    if (wetTile(t)) { wet.push(t); types[t.type] = (types[t.type] || 0) + 1; }
-  }
-  if (!valid) return "no data";
-  if (!wet.length) return "dry";
-  var top = wet.reduce(function (a, t) { return t.norm > a.norm ? t : a; });
-  var kind = Object.keys(types).sort(function (a, b2) { return types[b2] - types[a]; })[0];
-  var level = top.norm < 0.33 ? "low" : top.norm < 0.66 ? "middle" : "high";
-  return Math.round(wet.length / valid * 100) + " percent has signal, mostly " + kind + ", strongest is " + level + " near " + lonText(top.col);
-}
-function describe(tiles) {
-  return "At " + S.video.currentTime.toFixed(0) + " seconds. " + C.bands.map(function (b) { return b.name + ": " + bandText(b, tiles) + "."; }).join(" ");
-}
-function spotLine(t) {
-  var where = S.spot.name + ", " + spotWhere();
-  if (!t || t.value === null) return where + ": no data here. It may be land, or outside the map.";
-  if (!wetTile(t)) return where + ": no signal here at this moment.";
-  var L = legendFor(t);
-  return where + ": " + (L ? L.spec.label : "value") + " about " + fmt(t.value) + ".";
-}
-function updateTable(tiles) {
-  $("bandTable").innerHTML = C.bands.map(function (b) { return "<tr><th scope='row'>" + b.name + "</th><td>" + bandText(b, tiles) + "</td></tr>"; }).join("");
-  var wet = 0, nodata = 0;
-  tiles.forEach(function (t) { if (t.value === null) nodata++; else if (wetTile(t)) wet++; });
-  $("stats").textContent = "Tiles with signal: " + wet + " of " + tiles.length + ". No-data tiles: " + nodata + ".";
-}
-/* Spoken summary when the video ends: what the sound did at this place. */
-function finishText() {
-  var base = "Finished. ";
-  if (S.target !== "spot") return base + "Press Play to hear it again.";
-  var s = S.series;
-  if (!s.length) return base + "There was no data at " + S.spot.name + ". Move the spot and try again.";
-  var L = S.legends[0], k = Math.max(1, Math.floor(s.length / 5));
-  var mean = function (a) { return a.reduce(function (x, y) { return x + y; }, 0) / a.length; };
-  var first = mean(s.slice(0, k)), last = mean(s.slice(-k));
-  var lo = Math.min.apply(null, s), hi = Math.max.apply(null, s), span = Math.abs(L.spec.max - L.spec.min);
-  var move = Math.abs(last - first) < 0.05 * span ? "stayed about the same" : last > first ? "rose" : "fell";
-  var quiet = Math.round((1 - s.length / Math.max(1, S.ticks)) * 100);
-  return base + "At " + S.spot.name + ", " + L.spec.label + " started near " + fmt(first) + " and ended near " + fmt(last) + ", so it " + move +
-    ". Lowest " + fmt(lo) + ", highest " + fmt(hi) + "." + (quiet > 5 ? " It was silent " + quiet + " percent of the time." : "") + " Press Play to hear it again.";
-}
+  // ================= 2. Maps: what a legend value sounds like =================
+  // levels(v, o) turns a legend value into o[0] = pad amount (heat, hum) and o[1] = drops amount (cold, ticks), both 0..1.
+  var HOT_SOUND = { scale: 'minor', chime: 'ice', base: 69, dropGain: 1, pad: 'sawtooth', cutoff: [200, 2800], detune: [4, 30], tempo: [64, 128], tempoFrom: 'heat', reverb: 0.45, hiss: 0.05 };
+  EJ.MAPS = { temp: {
+    graph: [22, 0, 8, 14], name: 'Land temperature', legend: 'temp', coverage: 'full',
+    blurb: 'NASA T2M near-surface temperature, −40 to 40 °C. Heat builds a buzzing tone, cold rings as ice chimes.',
+    ticks: ['−40', '−20', '0', '20', '40 °C'], labels: ['Warm', 'Cold'], avg: 'Average',
+    fmt: function (v) { return Math.round(v) + ' °C'; },
+    levels: function (v, o) { o[0] = Math.sqrt(cl((v - 5) / 35)); o[1] = Math.sqrt(cl((5 - v) / 45)); }, // silent at 5 °C
+    voice: HOT_SOUND } };
+  EJ.map = function () { return EJ.MAPS[EJ.dataType]; };
 
-/* ===== REGION 8: DRAWING ===== */
-function label(g, text, x, y, align) {
-  g.font = "bold 28px sans-serif"; g.textAlign = align; g.textBaseline = "middle";
-  var w = g.measureText(text).width;
-  var bx = align === "center" ? x - w / 2 : align === "left" ? x : x - w;
-  g.fillStyle = "rgba(0,0,0,0.75)"; g.fillRect(bx - 6, y - 18, w + 12, 36);
-  g.fillStyle = "#fff"; g.fillText(text, x, y);
-}
-function spotBox() {
-  var s = S.spot;
-  return { x: (s.lon + 180) / 360 - SPOT_DEG / 720, y: (90 - s.lat) / 180 - SPOT_DEG / 360, w: SPOT_DEG / 360, h: SPOT_DEG / 180 };
-}
-function markVideo(hc) {
-  var cr = S.crop, cols = C.grid.cols, rows = C.grid.rows, b = S.active;
-  function put(id, x, y, w, h, on) {
-    var el = $(id); el.style.display = on ? "block" : "none";
-    el.style.left = x * 100 + "%"; el.style.top = y * 100 + "%"; el.style.width = w * 100 + "%"; el.style.height = h * 100 + "%";
+  // Colours for the spectrum bars and the readout, taken from the open map's legend and nudged to stay readable on glass.
+  var DEFAULT_G = { pad: 'rgb(255,106,69)', drops: 'rgb(74,168,255)', noise: 'rgb(110,190,160)', drone: 'rgb(169,155,255)' };
+  EJ.gcol = {}; for (var k0 in DEFAULT_G) EJ.gcol[k0] = DEFAULT_G[k0];
+  function fit(c) {
+    var l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], i; c = c.slice();
+    if (l < 110) { var t = (110 - l) / (255 - l); for (i = 0; i < 3; i++) c[i] += (255 - c[i]) * t; }
+    else if (l > 190) { var s = 1 - (l - 190) / l; for (i = 0; i < 3; i++) c[i] *= s; }
+    return 'rgb(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ')';
   }
-  if (S.target === "spot") {
-    var sb = spotBox();
-    put("vcol", cr.x + sb.x * cr.w, cr.y + sb.y * cr.h, sb.w * cr.w, sb.h * cr.h, true);
-    put("vtop", 0, 0, 0, 0, false); put("vbot", 0, 0, 0, 0, false);
-    return;
+  function updateGraphColors() {
+    var m = EJ.map(), L = EJ.LEGENDS[m.legend], root = document.documentElement.style;
+    var vals = m.graph || [0.8, 0.2, 0.45, 0.65].map(function (u) { return L.lo + u * (L.hi - L.lo); });
+    ['pad', 'drops', 'noise', 'drone'].forEach(function (k, i) { EJ.gcol[k] = fit(EJ.legendColor(m.legend, vals[i])); });
+    root.setProperty('--hot', EJ.gcol.pad); root.setProperty('--wet', EJ.gcol.drops);
   }
-  put("vcol", cr.x + (hc || 0) / cols * cr.w, cr.y, cr.w / cols, cr.h, hc !== undefined);
-  put("vtop", cr.x, cr.y, cr.w, b ? b.rowStart / rows * cr.h : 0, !!b && b.rowStart > 0);
-  put("vbot", cr.x, cr.y + (b ? b.rowEnd / rows : 1) * cr.h, cr.w, b ? (1 - b.rowEnd / rows) * cr.h : 0, !!b && b.rowEnd < rows);
-}
-function drawMap(tiles, hc) {
-  var cv = $("map"), cs = 64, cols = C.grid.cols, rows = C.grid.rows, mapMode = S.target === "map";
-  cv.width = cols * cs; cv.height = rows * cs;
-  var g = cv.getContext("2d"); g.fillStyle = "#000"; g.fillRect(0, 0, cv.width, cv.height);
-  tiles.forEach(function (t) {
-    var x = t.col * cs, y = t.row * cs;
-    if (t.value === null) return;
-    if (t.norm === undefined) { g.strokeStyle = "#444"; g.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1); return; }
-    g.fillStyle = "rgb(" + t.color.join(",") + ")"; g.fillRect(x, y, cs, cs);
-    if (S.legends.length > 1 && t.type !== S.legends[0].spec.type) { g.fillStyle = "#fff"; g.fillRect(x + cs / 2 - 3, y + cs / 2 - 3, 6, 6); }
-  });
-  if (mapMode && S.active) {
-    g.fillStyle = "rgba(0,0,0,0.65)"; g.fillRect(0, 0, cv.width, S.active.rowStart * cs);
-    g.fillRect(0, S.active.rowEnd * cs, cv.width, cv.height - S.active.rowEnd * cs);
-  }
-  if (mapMode) {
-    g.strokeStyle = "#fff"; g.lineWidth = 3;
-    C.bands.forEach(function (b) { g.beginPath(); g.moveTo(0, b.rowStart * cs); g.lineTo(cv.width, b.rowStart * cs); g.stroke(); });
-    if (hc !== undefined) { g.strokeStyle = S.accent || "#fff"; g.lineWidth = 5; g.strokeRect(hc * cs + 1.5, 1.5, cs - 3, cv.height - 3); }
-    label(g, "NORTH (high notes)", cv.width / 2, 24, "center");
-    label(g, "SOUTH (low notes)", cv.width / 2, cv.height - 24, "center");
-    label(g, "WEST", 8, cv.height / 2, "left");
-    label(g, "EAST", cv.width - 8, cv.height / 2, "right");
-  } else {
-    var b = spotBox(), px = (b.x + b.w / 2) * cv.width, py = (b.y + b.h / 2) * cv.height;
-    g.lineWidth = 11; g.strokeStyle = "#000"; g.beginPath(); g.arc(px, py, 26, 0, 7); g.stroke();
-    g.lineWidth = 5; g.strokeStyle = S.accent || "#fff"; g.beginPath(); g.arc(px, py, 26, 0, 7); g.stroke();
-    label(g, S.spot.name, cv.width / 2, 24, "center");
-  }
-  markVideo(hc);
-}
 
-/* ===== REGION 9: PLAYBACK =====
-   Both ticks read the frame that is on screen at this moment. Nothing is queued ahead,
-   so sound and picture cannot drift apart, and the music ends when the video ends. */
-function spotTick() {
-  if (S.video.readyState < 2) return;
-  S.ticks++;
-  S.tiles = analyze();
-  var t = S.sample = sampleSpot();
-  if (wetTile(t)) S.series.push(t.value);
-  playSample(t, S.ctx.currentTime + 0.02);
-  drawMap(S.tiles); glow(wetTile(t) ? t : null);
-  $("now").textContent = spotLine(t);
-  updateTable(S.tiles);
-}
-function colTick() {
-  if (S.video.readyState < 2) return;
-  var cols = C.grid.cols, rows = C.grid.rows, c = S.col, r, col = [];
-  if (c === 0) {
-    S.active = S.mode === "all" ? null : S.mode === "cycle" ? C.bands[S.beat % C.bands.length] : C.bands[+S.mode];
-    $("now").textContent = "Listening to: " + (S.active ? S.active.name : "all bands");
+  // ================= 3. Reading a legend picture (presets and uploads) =================
+  var SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+  function curve(x, c) { x = cl(x); return c === 'sqrt' ? Math.sqrt(x) : c === 'square' ? x * x : c === 'pow1.5' ? Math.pow(x, 1.5) : x; }
+  function num(x) { var a = Math.abs(x); return a >= 100 ? String(Math.round(x)) : a >= 1 ? x.toFixed(1) : x.toPrecision(2); }
+  function cf(d, i) { // colourfulness of one pixel: 0 for white, grey or transparent
+    if (d[i + 3] < 200) return 0;
+    var mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+    return mx ? (mx - mn) / mx * mx / 255 : 0;
   }
-  S.tiles = analyze();
-  for (r = 0; r < rows; r++) { var tl = S.tiles[r * cols + c]; if (wetTile(tl) && inBand(r)) col.push(tl); }
-  col.sort(function (a, b) { return b.norm - a.norm; });
-  var pan = ((c + 0.5) / cols * 2 - 1) * PAN, when = S.ctx.currentTime + 0.02;
-  col.slice(0, MAX_PER_COL).forEach(function (n) {
-    voice(midiToHz(pitchFor(n.row)), when, C.timbres[n.type] || C.timbres["default"], LOUD[0] + (LOUD[1] - LOUD[0]) * n.norm, pan);
-  });
-  drawMap(S.tiles, c); glow(col[0]);
-  if (c === 0) { updateTable(S.tiles); if (S.beat % ANNOUNCE === 0) say(describe(S.tiles)); }
-  S.col = (c + 1) % cols; if (!S.col) S.beat++;
-}
-function start() {
-  initAudio();
-  var rate = parseFloat($("rate").value), spot = S.target === "spot";
-  S.video.playbackRate = rate;
-  var pr = S.video.play(); if (pr && pr.catch) pr.catch(function () {});
-  if (S.video.currentTime < 0.5) { S.series = []; S.ticks = 0; S.beat = 0; }
-  S.col = 0; clearInterval(S.timer);
-  var tick = spot ? spotTick : colTick;
-  tick();
-  S.timer = setInterval(tick, (spot ? SPOT_MS : SWEEP_MS / C.grid.cols) / rate);
-  $("play").innerHTML = PAUSE; document.body.classList.add("running");
-  if (spot) say("Playing. Listening to " + S.spot.name + ".");
-}
-/* soft = let the last notes ring out (used when the video ends) */
-function stop(msg, soft) {
-  clearInterval(S.timer); S.timer = null;
-  if (S.ctx && !soft) newBus();
-  pulseOff(); S.video.pause(); $("play").innerHTML = PLAY; document.body.classList.remove("running");
-  if (S.tiles) drawMap(S.tiles);
-  if (msg) say(msg);
-}
-S.video.addEventListener("ended", function () { var m = finishText(); stop(m, true); });
-
-/* ===== REGION 10: MENU (coverflow) AND UPLOAD ===== */
-function layoutFlow() {
-  document.querySelectorAll(".cf").forEach(function (el, i) {
-    el.classList.toggle("on", i === S.idx);
-    el.setAttribute("aria-current", i === S.idx ? "true" : "false");
-  });
-}
-/* Paint a card with the real colours of its legend. */
-function paintCover(i, entries) {
-  var stops = [], k, n = 7, cv = document.querySelectorAll(".cf .cover")[i];
-  if (!cv) return;
-  for (k = 0; k < n; k++) stops.push(colorAt(entries, k / (n - 1)));
-  cv.style.background = "radial-gradient(circle at 30% 20%,rgba(255,255,255,.3),transparent 45%),linear-gradient(135deg," + stops.join(",") + ")";
-}
-function buildFlow() {
-  var fl = $("flow");
-  ITEMS.forEach(function (p, i) {
-    var b = document.createElement("button"); b.type = "button"; b.className = "cf"; b.tabIndex = -1;   // never takes focus, so Enter always means Play
-    b.setAttribute("aria-label", p.name + ", " + (i + 1) + " of " + ITEMS.length);
-    b.innerHTML = '<span class="cover"></span><span class="lab"><strong></strong><small></small></span>';
-    b.querySelector("strong").textContent = p.name;
-    b.querySelector("small").textContent = (i + 1) + " / " + ITEMS.length;
-    b.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    b.addEventListener("click", function () { if (S.view !== "menu") return; if (i === S.idx) enter(); else showItem(i); });
-    fl.appendChild(b);
-    var c = (p.theme && p.theme.colors) || ["#737373", "#404040", "#262626"];
-    b.querySelector(".cover").style.background = "linear-gradient(135deg," + c.join(",") + ")";
-    if (p.legends && p.legends.length) {
-      decodeLegend(p.legends[0]).then(function (L) {
-        p.cols = [colorAt(L.entries, 0.85), colorAt(L.entries, 0.55), colorAt(L.entries, 0.25)];
-        paintCover(i, L.entries);
-        if (S.idx === i && !(p.theme && p.theme.fixed)) setTheme(p.cols);
-      }).catch(function () {});
+  function ticks(L, log10, units) {
+    var t = [], k, v;
+    for (k = 0; k < 5; k++) {
+      v = L.lo + (L.hi - L.lo) * k / 4;
+      t.push(log10 ? (Math.abs(v - Math.round(v)) < 1e-6 ? '10' + String(Math.round(v)).split('').map(function (c) { return SUP[c]; }).join('') : '10^' + v.toFixed(1)) : String(Math.round(v * 100) / 100));
     }
-  });
-
-  window.addEventListener("resize", layoutFlow);
-}
-function openForm() {
-  S.formOpen = true; document.body.classList.add("form");
-  say("Upload form. Step one, choose your MP4 video. Step two, choose the legend picture. Then type the lowest and highest value and press Load and continue. Escape cancels.");
-  setTimeout(function () { $("file").focus(); }, 60);
-}
-function closeForm(quiet) {
-  S.formOpen = false; document.body.classList.remove("form");
-  if (!quiet) { say("Form closed."); $("start").focus(); }
-}
-function applyPreset(i) {
-  var p = ITEMS[i];
-  S.wetMin = p.wetMin !== undefined ? p.wetMin : A.wetMin; S.crop = p.mapCrop || FULL;
-  if (p.place) {
-    var k = PLACES.map(function (x) { return x.name; }).indexOf(p.place);
-    if (k >= 0) { S.spot = placeCopy(k); $("place").value = k; }
+    if (units) t[4] += ' ' + units;
+    return t;
   }
-}
-function setTheme(c) {
-  c = c || ["#38bdf8", "#6366f1", "#a855f7"]; S.accent = c[0];
-  var r = document.documentElement.style; r.setProperty("--a", c[0]); r.setProperty("--b", c[1]); r.setProperty("--c", c[2]);
-}
-function showItem(i, now) {
-  var p = ITEMS[i], b = $("top"); S.idx = i; $("preset").value = i;
-  document.body.classList.toggle("upload", i === ITEMS.length - 1);
-  closeForm(true);
-  stop(); applyPreset(i); S.loaded = false; $("play").disabled = true;
-  $("startLabel").textContent = isUpload() ? "Choose files" : "Play";
-  function text() { $("pTitle").textContent = p.name; $("pDesc").textContent = p.description || ""; $("pIdx").textContent = (i + 1) + " / " + ITEMS.length; b.classList.remove("swap"); }
-  if (now) text(); else { b.classList.add("swap"); setTimeout(text, 250); }
-  setTheme((p.cols && !(p.theme && p.theme.fixed)) ? p.cols : (p.theme && p.theme.colors));
-  say(p.name + ". " + (isUpload() ? "Press Enter to choose your files." : "Press Enter to start.") + " Use the left and right arrow keys to change.");
-  layoutFlow();
-}
-function resetPlayback(msg) {
-  stop(); S.video.currentTime = 0; S.beat = 0; S.col = 0; S.series = []; S.ticks = 0; S.tiles = null; S.sample = null; S.active = null; $("seek").value = 0;
-  var cv = $("map"); cv.getContext("2d").clearRect(0, 0, cv.width, cv.height); markVideo();
-  $("stats").textContent = "Not analysed yet."; $("bandTable").innerHTML = ""; $("now").textContent = "Nothing yet";
-  var m = typeof msg === "string" ? msg : "Back at the start. Press Play.";
-  if (S.loaded && S.view === "play") preview(m); else say(m);
-}
-/* Shows the first frame without sound. Playback starts only when Play is pressed. */
-function preview(msg) {
-  function go() {
-    try { S.tiles = analyze(); S.sample = sampleSpot(); drawMap(S.tiles); updateTable(S.tiles); } catch (e) {}
-    $("now").textContent = S.target === "spot" ? "Listening to: " + S.spot.name : "Paused. Press Play to listen.";
-    say(msg || ("Ready and paused." + (S.target === "spot" ? " Listening to " + S.spot.name + "." : "") + " Press Play to listen." + (S.warn ? " " + S.warn : "")));
-  }
-  if (S.video.seeking) S.video.addEventListener("seeked", go, { once: true }); else go();
-}
-async function enter() {
-  initAudio();   /* inside the key press, before any await, or the browser keeps sound muted */
-  if (S.busy) return;
-  if (isUpload() && !S.formOpen) { openForm(); return; }   // upload card: Play opens the form first
-  S.busy = true;
-  try {
-    if (!S.loaded) await onLoad();
-    if (!S.loaded) return;
-    document.body.classList.add("playing"); S.view = "play"; preview(); $("play").focus();
-  } finally { S.busy = false; }
-}
-function leave() {
-  resetPlayback("Back to the menu. Press Enter to play again."); document.body.classList.remove("playing"); S.view = "menu";
-  if (S.formOpen) $("file").focus(); else $("start").focus();
-}
-async function onLoad() {
-  stop(); S.loaded = false; $("play").disabled = true;
-  var P = ITEMS[S.idx], file = null, url = P.videoUrl, specs;
-  if (isUpload()) {
-    file = $("file").files[0]; var lf = $("legendFile").files[0];
-    if (!file) return say("Choose your video first. It must be an MP4.");
-    if (!lf) return say("Choose the legend picture, the image of the color bar.");
-    var mn = parseFloat($("upMin").value), mx = parseFloat($("upMax").value);
-    if (!isFinite(mn) || !isFinite(mx) || mn === mx) return say("Type the lowest and the highest value shown on the legend.");
-    specs = [{ label: $("upLabel").value.trim() || "Legend", type: "default", url: URL.createObjectURL(lf), min: mn, max: mx,
-      scale: ($("upScale").value === "log" && mn > 0 && mx > 0) ? "log" : "linear", orientation: $("upDir").value, crop: FULL }];
-    S.wetMin = -1e9; S.crop = FULL;
-  } else specs = P.legends;
-  if (!file && !url) return say("This preset has no video.");
-  if (!specs || !specs.length) return say("No usable legend.");
-  try {
-    say("Loading legend.");
-    S.legends = []; for (var i = 0; i < specs.length; i++) S.legends.push(await decodeLegend(specs[i]));
-    S.warn = legendOverlap();
-    showLegends();
-    var en = S.legends[0].entries;
-    if (isUpload()) paintCover(S.idx, en);
-    if (!(P.theme && P.theme.fixed)) setTheme([colorAt(en, 0.85), colorAt(en, 0.55), colorAt(en, 0.25)]);
-    say("Loading video.");
-    await loadVideo(file ? URL.createObjectURL(file) : url, !!file);
-    prepAnalysis(); S.loaded = true; $("play").disabled = false;
-    say("Ready. Press Play.");
-  } catch (e) {
-    say("Could not load: " + e.message + ". If the file is not an MP4 or the legend is not a picture, choose another. If you host the site, run server.py or check the file paths.");
-  }
-}
-
-/* ===== REGION 11: PAGE CONTROLS ===== */
-function setTargetUI() { $("spotOpts").hidden = S.target !== "spot"; $("mapOpts").hidden = S.target !== "map"; }
-/* The spot changed. While paused: redraw and play one note so you hear what is there. While playing: next tick uses it. */
-function moveSpot() {
-  if (S.timer) { say(S.spot.name + ", " + spotWhere()); return; }
-  if (S.loaded && S.data) {
-    try {
-      S.tiles = analyze(); S.sample = sampleSpot(); drawMap(S.tiles);
-      if (S.ctx) playSample(S.sample, S.ctx.currentTime + 0.02);
-    } catch (e) {}
-    say(spotLine(S.sample));
-  } else say(S.spot.name + ", " + spotWhere());
-}
-function setSpot(lat, lon) {
-  S.spot = { name: "Custom spot", lat: Math.round(Math.max(-85, Math.min(85, lat))), lon: Math.round(((lon + 180) % 360 + 360) % 360 - 180) };
-  $("place").value = "custom";
-  moveSpot();
-}
-function pickAt(ev, el, isVideo) {
-  if (S.target !== "spot" || !S.loaded) return;
-  var r = el.getBoundingClientRect(), fx = (ev.clientX - r.left) / r.width, fy = (ev.clientY - r.top) / r.height;
-  if (isVideo) { fx = (fx - S.crop.x) / S.crop.w; fy = (fy - S.crop.y) / S.crop.h; }
-  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return;
-  setSpot(90 - fy * 180, -180 + fx * 360);
-}
-(function wire() {
-  ITEMS.forEach(function (p, i) { var o = document.createElement("option"); o.value = i; o.textContent = p.name; $("preset").appendChild(o); });
-  $("preset").addEventListener("change", function () { showItem(+this.value); });
-
-  var pl = $("place");
-  PLACES.forEach(function (p, i) { var o = document.createElement("option"); o.value = i; o.textContent = p.name; pl.appendChild(o); });
-  var oc = document.createElement("option"); oc.value = "custom"; oc.textContent = "Custom spot (moved)"; pl.appendChild(oc);
-  pl.addEventListener("change", function () { if (this.value === "custom") return; S.spot = placeCopy(+this.value); moveSpot(); });
-
-  buildFlow();
-  showItem(0, true);
-
-  function go(d) { if (S.view === "menu") showItem((S.idx + d + ITEMS.length) % ITEMS.length); }
-  $("start").addEventListener("click", enter);
-  $("cancelForm").addEventListener("click", function () { closeForm(); });
-  $("back").addEventListener("click", function () { if (S.view === "play") leave(); });
-  var sx = null, sy = 0;
-  document.addEventListener("touchstart", function (e) { var t = e.touches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
-  document.addEventListener("touchend", function (e) {
-    if (S.view !== "menu" || sx === null) return;
-    if (e.target.closest && e.target.closest("#source")) { sx = null; return; }
-    var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; sx = null;
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1);
-  }, { passive: true });
-  $("source").addEventListener("input", function () { S.loaded = false; $("play").disabled = true; });
-  Object.keys(C.info || {}).forEach(function (k) { var el = $("info-" + k); if (el && C.info[k] === false) el.hidden = true; });
-
-  var ms = $("mode");
-  ms.innerHTML = "<option value='cycle'>One band at a time (cycle)</option><option value='all'>All bands together</option>" +
-    C.bands.map(function (b, i) { return "<option value='" + i + "'>" + b.name + " only</option>"; }).join("");
-  ms.value = S.mode; ms.addEventListener("change", function () { S.mode = this.value; resetPlayback(); });
-  $("target").value = S.target; setTargetUI();
-  $("target").addEventListener("change", function () { S.target = this.value; setTargetUI(); resetPlayback(); });
-  $("invert").checked = S.invert; $("invert").addEventListener("change", function () { S.invert = this.checked; resetPlayback(); });
-  $("notes").value = MAX_PER_COL; $("notes").addEventListener("change", function () { MAX_PER_COL = Math.max(1, +this.value || 1); resetPlayback(); });
-  var sk = $("seek");
-  S.video.addEventListener("timeupdate", function () { if (S.video.duration) sk.value = S.video.currentTime / S.video.duration * 1000; });
-  sk.addEventListener("input", function () { if (S.loaded) S.video.currentTime = sk.value / 1000 * S.video.duration; });
-  $("load").addEventListener("click", enter);
-  $("play").addEventListener("click", function () { if (S.timer) stop("Paused."); else start(); });
-  $("key").addEventListener("click", soundKey);
-  $("describe").addEventListener("click", function () {
-    if (!S.tiles) return say("Nothing analysed yet. Press Play.");
-    say(S.target === "spot" ? spotLine(S.sample) : describe(S.tiles));
-  });
-  $("volume").addEventListener("input", function () { if (S.master) S.master.gain.value = parseFloat(this.value); });
-  $("rate").addEventListener("change", function () { resetPlayback(); });
-
-  /* choose the spot: click the map or the video, or focus the map and use the arrow keys */
-  $("map").addEventListener("click", function (e) { pickAt(e, this, false); });
-  S.video.addEventListener("click", function (e) { pickAt(e, this, true); });
-  $("map").addEventListener("keydown", function (e) {
-    var dx = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0, dy = e.key === "ArrowUp" ? 1 : e.key === "ArrowDown" ? -1 : 0;
-    if (!dx && !dy) return;
-    e.preventDefault();
-    if (S.target === "spot") setSpot(S.spot.lat + dy * SPOT_STEP, S.spot.lon + dx * SPOT_STEP);
-  });
-
-  document.addEventListener("keydown", function (e) {
-    var tg = e.target.tagName;
-    if (e.key === "Escape") { if (S.view === "play") leave(); else if (S.formOpen) closeForm(); return; }
-    if (/INPUT|SELECT|TEXTAREA/.test(tg)) return;
-    if (tg === "CANVAS" && e.key.indexOf("Arrow") === 0) return;   // the map uses the arrows to move the spot
-    var onBtn = tg === "BUTTON";
-    if (e.key === " ") { if (onBtn) return; e.preventDefault(); if (S.view === "play") $("play").click(); else enter(); }
-    else if (e.key === "Enter" && S.view === "menu") { if (!onBtn) enter(); }
-    else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      var d = e.key === "ArrowRight" ? 1 : -1;
-      if (S.view === "play") { if (S.loaded) S.video.currentTime = Math.max(0, Math.min(S.video.duration, S.video.currentTime + 5 * d)); }
-      else showItem((S.idx + d + ITEMS.length) % ITEMS.length);
+  // Picture of a colour bar → legend. The most colourful band of rows is the bar; its colourful stretch is sampled,
+  // as a smooth gradient or as distinct steps (guessed from how often the colour jumps).
+  function readLegend(img, o) {
+    var W = img.naturalWidth, H = img.naturalHeight, cv = document.createElement('canvas'), x, y, k;
+    cv.width = W; cv.height = H;
+    var cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0);
+    var d = cx.getImageData(0, 0, W, H).data, bar = o.bar || {}, row = bar.row, x0 = bar.x0, x1 = bar.x1;
+    if (row == null) {
+      var sc = [], mxs = 0, runS = -1, runL = 0, bs = 0, bl = 0;
+      for (y = 0; y < H; y++) { var s = 0; for (x = 0; x < W; x += 2) s += cf(d, (y * W + x) * 4); sc.push(s); mxs = Math.max(mxs, s); }
+      if (mxs < 4) throw new Error('no colour bar found in ' + (o.image || 'the image'));
+      for (y = 0; y <= H; y++) {
+        if (y < H && sc[y] >= 0.8 * mxs) { if (!runL) runS = y; runL++; }
+        else { if (runL > bl) { bl = runL; bs = runS; } runL = 0; }
+      }
+      row = bs + Math.floor(bl / 2);
     }
+    if (x0 == null || x1 == null) {
+      x0 = 0; x1 = W - 1;
+      while (x0 < W && cf(d, (row * W + x0) * 4) < 0.1) x0++;
+      while (x1 > x0 && cf(d, (row * W + x1) * 4) < 0.1) x1--;
+      if (x1 - x0 < 10) throw new Error('could not find a colour bar in ' + (o.image || 'the image') + ' (set legend.bar)');
+    }
+    function px(xx) { var i = (row * W + Math.round(xx)) * 4; return [d[i], d[i + 1], d[i + 2]]; }
+    var s160 = [], jumps = 0, flat = 0, df;
+    for (k = 0; k < 160; k++) s160.push(px(x0 + (x1 - x0) * k / 159));
+    for (k = 1; k < 160; k++) {
+      df = Math.abs(s160[k][0] - s160[k - 1][0]) + Math.abs(s160[k][1] - s160[k - 1][1]) + Math.abs(s160[k][2] - s160[k - 1][2]);
+      if (df > 40) jumps++; if (df <= 6) flat++;
+    }
+    var type = o.type || 'auto', steps = type === 'auto' ? (jumps > 0 && jumps <= 14 && flat / 159 >= 0.7) : type === 'steps';
+    var lo = o.lo == null ? 0 : o.lo, hi = o.hi == null ? 1 : o.hi, colors = [], n, p, u;
+    if (steps) n = Math.max(2, jumps + 1); else n = o.samples || 41;
+    for (k = 0; k < n; k++) {
+      u = steps ? (k + 0.5) / n : k / (n - 1); p = px(x0 + (x1 - x0) * u);
+      colors.push([lo + (hi - lo) * u, p[0], p[1], p[2], u]); // u (0..1) is kept so the range can be changed later
+    }
+    return { lo: lo, hi: hi, discrete: steps, tol: o.tol || 50, colors: colors };
+  }
+  // A legend becomes a normal map type. lo/hi are read at call time, so a custom legend can be re-ranged.
+  function registerMap(p, L) {
+    var pd = p.pad || [0.5, 1, 'sqrt'], dr = p.drops || [0.5, 0, 'sqrt'], lg = p.legend || {};
+    EJ.LEGENDS[p.map] = L;
+    EJ.MAPS[p.map] = {
+      name: p.mapName || p.name, legend: p.map, coverage: p.coverage || (L.discrete ? 'sparse' : 'full'), blurb: p.blurb || '',
+      ticks: p.ticks || ticks(L, lg.log10, lg.units), labels: p.labels || ['High', 'Low'], avg: 'Average', graph: p.graph,
+      fmt: function (v) { return num(lg.log10 ? Math.pow(10, v) : v) + (lg.units ? ' ' + lg.units : ''); },
+      levels: function (v, o) { var u = (v - L.lo) / (L.hi - L.lo); o[0] = curve((u - pd[0]) / (pd[1] - pd[0]), pd[2]); o[1] = curve((u - dr[0]) / (dr[1] - dr[0]), dr[2]); },
+      voice: Object.assign({}, EJ.MAPS[p.like || 'temp'].voice, p.voice)
+    };
+  }
+
+  // ================= 4. Analysis: pixels → numbers, and the sweep =================
+  EJ.HH = new Float32Array(C * R);  // pad amount per cell
+  EJ.WW = new Float32Array(C * R);  // drops amount per cell
+  EJ.rowHeat = new Float32Array(R); // pad amount per ROW under the sweep line
+  EJ.rowRain = new Float32Array(R); // drops amount per ROW under the sweep line
+  EJ.meanHeat = 0; EJ.meanRain = 0; EJ.meanValue = null; EJ.tempo = 0;
+
+  function analyzeGrid(d) {
+    var m = EJ.map(), o = [0, 0], sh = 0, sw = 0, sv = 0, valid = 0, i, v;
+    for (i = 0; i < C * R; i++) {
+      v = EJ.legendMatch(m.legend, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+      if (v === null) { o[0] = 0; o[1] = 0; } else { m.levels(v, o); sv += v; valid++; }
+      EJ.HH[i] = o[0]; EJ.WW[i] = o[1]; sh += o[0]; sw += o[1];
+    }
+    // 'full' maps colour every cell: average over matched cells. 'sparse' maps are mostly empty: average over all cells, ×3.
+    var div = m.coverage === 'full' ? Math.max(1, valid) : C * R, mul = m.coverage === 'full' ? 1.5 : 3;
+    EJ.meanHeat = Math.min(1, sh / div * mul); EJ.meanRain = Math.min(1, sw / div * mul);
+    EJ.meanValue = valid ? sv / valid : null;
+  }
+  // Sweep: one pass takes `dur` seconds, then loops. The 3 columns under the line are averaged per row.
+  var t0 = 0;
+  function sweepPos(ts, playing) { return playing ? (((ts - t0) / 1000 / (46 - parseFloat($('speed').value))) % 1) : 0; }
+  function sweepLevels(col) {
+    for (var r = 0; r < R; r++) {
+      var a = 0, b = 0, n = 0;
+      for (var c = Math.max(0, col - 1); c <= Math.min(C - 1, col + 1); c++) { a += EJ.HH[r * C + c]; b += EJ.WW[r * C + c]; n++; }
+      EJ.rowHeat[r] = a / n; EJ.rowRain[r] = b / n;
+    }
+  }
+  function sweepPan(pos) { return pos * 1.6 - 0.8; }
+
+  // Plain-language description of the frame, for screen readers: names where each amount is strongest in a 3 × 3 split.
+  var NS = ['north', 'middle', 'south'], WE = ['west', 'centre', 'east'];
+  function where(G) {
+    var best = 0, bi = -1, s = new Float32Array(9), r, c, i;
+    for (r = 0; r < R; r++) for (c = 0; c < C; c++) s[Math.min(2, r * 3 / R | 0) * 3 + Math.min(2, c * 3 / C | 0)] += G[r * C + c];
+    for (i = 0; i < 9; i++) if (s[i] > best) { best = s[i]; bi = i; }
+    if (bi < 0 || best < 2) return '';
+    var ns = bi / 3 | 0, we = bi % 3;
+    if (ns === 1 && we === 1) return 'in the middle of the frame';
+    return 'strongest in the ' + (ns === 1 ? '' : NS[ns] + (we === 1 ? '' : '-')) + (we === 1 && ns !== 1 ? '' : WE[we] === 'centre' ? '' : WE[we]);
+  }
+  function level(x) { return x < 0.03 ? 'almost none' : x < 0.25 ? 'light' : x < 0.55 ? 'moderate' : 'strong'; }
+  function describe() {
+    var m = EJ.map(), h = EJ.meanHeat, w = EJ.meanRain, out = [m.name + '.'];
+    out.push(m.labels[0] + ': ' + level(h) + ' (' + Math.round(h * 100) + '%)' + (h >= 0.03 ? ', ' + where(EJ.HH) : '') + '.');
+    out.push(m.labels[1] + ': ' + level(w) + ' (' + Math.round(w * 100) + '%)' + (w >= 0.03 ? ', ' + where(EJ.WW) : '') + '.');
+    if (EJ.meanValue !== null) out.push(m.avg + ': ' + m.fmt(EJ.meanValue) + '.');
+    out.push('Tempo ' + Math.round(EJ.tempo) + ' beats per minute, in a ' + m.voice.scale + ' scale (' + (m.voice.scale === 'minor' ? 'darker' : 'brighter') + '). High notes are the north, low notes the south.');
+    return out.join(' ');
+  }
+
+  // ================= 5. Audio (Web Audio API) =================
+  // PAD: two detuned waves per row (louder, brighter, buzzier with heat). DROPS: drips or ice chimes (cold / ticks).
+  // NOISE: filtered noise bed. DRONE: quiet A + E so calm areas are never silent.
+  var ac = null, master, pan, revSend, lowpass, noiseGain, dropBus, taps = {}, voices = [], drones = [], nextTime = 0;
+  var A = EJ.audio = { playing: false };
+  var SCALES = { major: [0, 2, 4, 7, 9], minor: [0, 3, 5, 7, 10] };
+  function noteFreq(i, base, scale) { return 440 * Math.pow(2, (base + Math.floor(i / 5) * 12 + SCALES[scale || 'major'][i % 5] - 69) / 12); }
+  function tap(key) { // analyser for one layer; it only listens
+    if (!taps[key]) {
+      var an = ac.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.75; an.minDecibels = -90; an.maxDecibels = -20;
+      taps[key] = { an: an, buf: new Uint8Array(an.frequencyBinCount) };
+    }
+    return taps[key].an;
+  }
+  function build() {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 0.7;
+    pan = ac.createStereoPanner();
+    var comp = ac.createDynamicsCompressor();
+    master.connect(pan); pan.connect(comp); comp.connect(ac.destination);
+    var sr = ac.sampleRate, len = Math.floor(sr * 2.4), ib = ac.createBuffer(2, len, sr), c, i;
+    for (c = 0; c < 2; c++) { var data = ib.getChannelData(c); for (i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    var reverb = ac.createConvolver(); reverb.buffer = ib;
+    revSend = ac.createGain(); revSend.gain.value = 0.45; revSend.connect(reverb); reverb.connect(master);
+    lowpass = ac.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.Q.value = 2; lowpass.frequency.value = 300;
+    var padVerb = ac.createGain(); padVerb.gain.value = 0.25;
+    lowpass.connect(master); lowpass.connect(padVerb); padVerb.connect(revSend); lowpass.connect(tap('pad'));
+    dropBus = ac.createGain(); dropBus.connect(master); dropBus.connect(revSend); dropBus.connect(tap('drops'));
+    for (var r = 0; r < R; r++) {
+      var g = ac.createGain(); g.gain.value = 0; g.connect(lowpass);
+      var a = ac.createOscillator(), b = ac.createOscillator(), f = noteFreq(r, 33);
+      a.type = b.type = 'sawtooth'; a.frequency.value = b.frequency.value = f;
+      a.connect(g); b.connect(g); a.start(); b.start();
+      voices.push({ g: g, b: b, a: a });
+    }
+    [55, 82.41].forEach(function (f) {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.value = f; g.gain.value = 0; o.connect(g); g.connect(master); g.connect(tap('drone')); o.start(); drones.push(g);
+    });
+    var nb = ac.createBuffer(1, sr * 2, sr), nd = nb.getChannelData(0);
+    for (var k = 0; k < nd.length; k++) nd[k] = Math.random() * 2 - 1;
+    var ns = ac.createBufferSource(); ns.buffer = nb; ns.loop = true;
+    var bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3500; bp.Q.value = 0.6;
+    noiseGain = ac.createGain(); noiseGain.gain.value = 0;
+    ns.connect(bp); bp.connect(noiseGain); noiseGain.connect(master); noiseGain.connect(tap('noise')); ns.start();
+    applyVoice();
+  }
+  // Wave type, scale and reverb follow the open map.
+  function applyVoice() {
+    if (!ac) return;
+    var v = EJ.map().voice;
+    voices.forEach(function (voice, r) {
+      voice.a.type = voice.b.type = v.pad;
+      var f = noteFreq(r, 33, v.scale);
+      voice.a.frequency.setTargetAtTime(f, ac.currentTime, 0.05); voice.b.frequency.setTargetAtTime(f, ac.currentTime, 0.05);
+    });
+    revSend.gain.setTargetAtTime(v.reverb, ac.currentTime, 0.3);
+  }
+  A.applyVoice = applyVoice;
+  function drop(i, when, vel) { // one drip (falls from a higher pitch) or ice chime (steady pitch plus a glassy overtone)
+    var v = EJ.map().voice, ice = v.chime === 'ice', o = ac.createOscillator(), g = ac.createGain(), f = noteFreq(i, v.base, v.scale);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(ice ? f : f * 1.35, when); o.frequency.exponentialRampToValueAtTime(f, when + 0.07);
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime((0.03 + 0.14 * vel) * v.dropGain, when + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0008, when + 1.4);
+    o.connect(g); g.connect(dropBus); o.start(when); o.stop(when + 1.5);
+    if (ice) {
+      var o2 = ac.createOscillator(), g2 = ac.createGain();
+      o2.type = 'sine'; o2.frequency.value = f * 2.76;
+      g2.gain.setValueAtTime(0, when);
+      g2.gain.linearRampToValueAtTime((0.012 + 0.05 * vel) * v.dropGain, when + 0.003);
+      g2.gain.exponentialRampToValueAtTime(0.0005, when + 0.7);
+      o2.connect(g2); g2.connect(dropBus); o2.start(when); o2.stop(when + 0.8);
+    }
+  }
+  setInterval(function () { // every 30 ms: schedule drops slightly ahead, one eighth note per step at EJ.tempo
+    if (!A.playing || !ac) return;
+    var step = 60 / EJ.tempo / 2;
+    while (nextTime < ac.currentTime + 0.15) {
+      var n = 0;
+      for (var r = 0; r < R && n < 4; r++) {
+        var amt = EJ.rowRain[r];
+        if (amt > 0 && Math.random() < amt * 0.45) { drop(R - 1 - r, nextTime + Math.random() * 0.03, amt); n++; }
+      }
+      nextTime += step;
+    }
+  }, 30);
+  A.start = function (volume) {
+    if (!ac) build();
+    if (ac.state === 'suspended') ac.resume();
+    applyVoice(); master.gain.value = volume; nextTime = ac.currentTime + 0.05; A.playing = true;
+  };
+  A.stop = function () {
+    A.playing = false;
+    if (!ac) return;
+    var now = ac.currentTime;
+    for (var i = 0; i < R; i++) voices[i].g.gain.setTargetAtTime(0, now, 0.06);
+    noiseGain.gain.setTargetAtTime(0, now, 0.1);
+    drones.forEach(function (g) { g.gain.setTargetAtTime(0, now, 0.2); });
+  };
+  A.setVolume = function (v) { if (master) master.gain.value = v; };
+  A.spectrum = function (key, out) { // 0..1 levels, low to high pitch on a log scale
+    var t = taps[key], n = out.length, i;
+    if (!t || !A.playing) { for (i = 0; i < n; i++) out[i] = 0; return; }
+    t.an.getByteFrequencyData(t.buf);
+    var lo = 40, hi = 8000, bw = ac.sampleRate / t.an.fftSize;
+    for (i = 0; i < n; i++) {
+      var b0 = Math.floor(lo * Math.pow(hi / lo, i / n) / bw), b1 = Math.max(b0 + 1, Math.ceil(lo * Math.pow(hi / lo, (i + 1) / n) / bw)), m = 0;
+      for (var b = b0; b < b1; b++) if (t.buf[b] > m) m = t.buf[b];
+      out[i] = m / 255;
+    }
+  };
+  A.update = function (pos) { // every frame while playing; setTargetAtTime glides, so nothing clicks
+    var v = EJ.map().voice, now = ac.currentTime;
+    for (var r = 0; r < R; r++) {
+      var voice = voices[R - 1 - r]; // top row → highest voice
+      voice.g.gain.setTargetAtTime(EJ.rowHeat[r] * 0.05, now, 0.06);
+      voice.b.detune.setTargetAtTime(v.detune[0] + EJ.meanHeat * (v.detune[1] - v.detune[0]), now, 0.1);
+    }
+    lowpass.frequency.setTargetAtTime(v.cutoff[0] + EJ.meanHeat * (v.cutoff[1] - v.cutoff[0]), now, 0.1);
+    noiseGain.gain.setTargetAtTime(EJ.meanRain * v.hiss, now, 0.15);
+    drones.forEach(function (g) { g.gain.setTargetAtTime(0.03, now, 0.2); });
+    pan.pan.setTargetAtTime(sweepPan(pos), now, 0.05);
+  };
+
+  // ================= 6. Spectrum: one live bar per layer =================
+  var SN = 32, specRows = [];
+  [{ key: 'pad', name: 'Pad' }, { key: 'drops', name: 'Drops' }, { key: 'noise', name: 'Noise bed' }, { key: 'drone', name: 'Drone' }].forEach(function (L) {
+    var row = document.createElement('div'); row.className = 'srow';
+    var label = document.createElement('div'); label.className = 'slabel'; label.textContent = L.name;
+    var cv = document.createElement('canvas'); cv.width = 256; cv.height = 24; cv.setAttribute('aria-hidden', 'true');
+    row.appendChild(label); row.appendChild(cv); $('specRows').appendChild(row);
+    specRows.push({ key: L.key, cv: cv, ctx: cv.getContext('2d'), data: new Float32Array(SN) });
   });
-})();
+  function drawSpectrum(playing) {
+    $('specHint').style.display = playing ? 'none' : '';
+    specRows.forEach(function (r) {
+      EJ.audio.spectrum(r.key, r.data);
+      var w = r.cv.width, h = r.cv.height, bw = w / SN, c = r.ctx;
+      c.clearRect(0, 0, w, h); c.fillStyle = EJ.gcol[r.key];
+      for (var i = 0; i < SN; i++) { var bh = Math.max(2, r.data[i] * h); c.fillRect(i * bw + 1, h - bh, bw - 2, bh); }
+    });
+  }
+
+  // ================= 7. The page: screens, playlist, player, main loop =================
+  var body = document.body, about = $('about'), sets = $('settings'), lastF = null;
+  var view = $('view'), vctx = view.getContext('2d'), small = $('pix');
+  small.width = C; small.height = R;
+  var sctx = small.getContext('2d', { willReadFrequently: true });
+  vctx.imageSmoothingQuality = 'high';
+  var src = null, objUrl = null, cur = 0, frameCount = 0, looping = false, customs = [], seq = 0, ranges = {};
+
+  function tracks() { return (EJ.PRESETS || []).filter(function (p) { return EJ.MAPS[p.map]; }).concat(customs); }
+  function say(t) { $('cap').textContent = t; }                                          // on-screen line, also announced (aria-live)
+  function announce(t) { say(t); var s = $('sr'); s.textContent = ''; setTimeout(function () { s.textContent = t; }, 50); } // for screen readers
+  function screenName() { return body.classList.contains('home') ? 'home' : body.classList.contains('playing') ? 'play' : 'menu'; }
+  function screen(s) { body.classList.toggle('home', s === 'home'); body.classList.toggle('playing', s === 'play'); }
+
+  function paint() {
+    if (!src) {
+      vctx.fillStyle = '#20242f'; vctx.fillRect(0, 0, VW, VH);
+      vctx.fillStyle = '#9aa3bb'; vctx.font = '18px sans-serif'; vctx.textAlign = 'center';
+      vctx.fillText('Load a picture or video to begin', VW / 2, VH / 2); return;
+    }
+    vctx.fillStyle = '#8c8c8c'; vctx.fillRect(0, 0, VW, VH); // grey bars are not on any legend, so they stay silent
+    var el = src.el, iw = el.videoWidth || el.naturalWidth, ih = el.videoHeight || el.naturalHeight;
+    if (!iw || !ih) return;
+    var s = Math.min(VW / iw, VH / ih);
+    vctx.drawImage(el, (VW - iw * s) / 2, (VH - ih * s) / 2, iw * s, ih * s);
+  }
+  function frame(ts) {
+    paint();
+    sctx.drawImage(view, 0, 0, C, R);
+    analyzeGrid(sctx.getImageData(0, 0, C, R).data);
+    var playing = EJ.audio.playing, pos = sweepPos(ts, playing);
+    sweepLevels(Math.min(C - 1, Math.floor(pos * C)));
+    var v = EJ.map().voice, drive = v.tempoFrom === 'rain' ? EJ.meanRain : EJ.meanHeat;
+    EJ.tempo = v.tempo[0] + drive * (v.tempo[1] - v.tempo[0]);
+    if (playing) EJ.audio.update(pos);
+    $('ph').style.display = $('ph2').style.display = playing ? 'block' : 'none';
+    if (playing) $('ph').style.left = $('ph2').style.left = (pos * 100) + '%';
+    drawSpectrum(playing);
+    if (++frameCount % 6 === 0) {
+      var m = EJ.map();
+      $('rh').textContent = Math.round(EJ.meanHeat * 100) + '%';
+      $('rw').textContent = Math.round(EJ.meanRain * 100) + '%';
+      $('rt').textContent = Math.round(EJ.tempo);
+      $('ra').textContent = EJ.meanValue === null ? '–' : m.fmt(EJ.meanValue);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Loading your own picture or video ----------
+  function kindOf(f) {
+    var t = f.type || '', n = f.name || '';
+    if (t.indexOf('video') === 0 || /\.(mp4|m4v|mov|webm|ogv|3gp)$/i.test(n)) return 'video';
+    if (t.indexOf('image') === 0 || /\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/i.test(n)) return 'image';
+    return null;
+  }
+  function loadFile(f) {
+    if (!f) return;
+    var kind = kindOf(f);
+    if (!kind) { announce('That file is not an image or video. Try a PNG, JPG, MP4, MOV or WebM.'); return; }
+    if (src && src.kind === 'video') src.el.pause();
+    if (objUrl) URL.revokeObjectURL(objUrl);
+    objUrl = URL.createObjectURL(f);
+    say('Loading ' + f.name + '…');
+    function use(k, el) { src = { kind: k, el: el, name: f.name }; announce('Source: ' + f.name + '. Colors are matched to the ' + EJ.map().name.toLowerCase() + ' legend.'); }
+    if (kind === 'video') {
+      var v = document.createElement('video'), shown = false;
+      v.muted = true; v.loop = true; v.playsInline = true;
+      v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+      v.onerror = function () { announce('This browser could not play that video. Try an MP4 (H.264) or a still image.'); };
+      v.onloadeddata = function () {
+        if (shown) return; shown = true; use('video', v);
+        var p = v.play(); if (p && p.catch) p.catch(function () { say('Tap the picture to start the video.'); });
+      };
+      v.src = objUrl; v.load();
+    } else {
+      var im = new Image();
+      im.onload = function () { use('image', im); };
+      im.onerror = function () { announce('Could not open that image. Try a JPG or PNG.'); };
+      im.src = objUrl;
+    }
+  }
+  $('pick').onclick = function () { $('file').click(); };
+  $('cam').onclick = function () { $('camFile').click(); };
+  $('file').onchange = function (e) { loadFile(e.target.files[0]); e.target.value = ''; };
+  $('camFile').onchange = function (e) { loadFile(e.target.files[0]); e.target.value = ''; };
+  var vb = $('viewBox');
+  vb.addEventListener('click', function () { if (!src) $('file').click(); else if (src.kind === 'video' && src.el.paused) src.el.play(); });
+  vb.addEventListener('dragover', function (e) { e.preventDefault(); vb.classList.add('drop'); });
+  vb.addEventListener('dragleave', function () { vb.classList.remove('drop'); });
+  vb.addEventListener('drop', function (e) { e.preventDefault(); vb.classList.remove('drop'); loadFile(e.dataTransfer.files[0]); });
+
+  // ---------- Your own legend ----------
+  $('legendPick').onclick = function () { $('legendFile').click(); };
+  $('legendFile').onchange = function (e) {
+    var f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    say('Reading ' + f.name + '…');
+    var url = URL.createObjectURL(f), img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      try {
+        var L = readLegend(img, { image: f.name }), id = 'custom' + (++seq), name = f.name.replace(/\.[^.]+$/, '');
+        registerMap({ id: id, map: id, mapName: 'Custom: ' + name, blurb: 'Your own legend, ' + L.colors.length + (L.discrete ? ' steps' : ' colors') + '. Above the middle value buzzes, below it chimes.',
+          voice: { scale: 'major', reverb: 0.5, hiss: 0.04 } }, L);
+        ranges[id] = function (lo, hi) {
+          L.lo = lo; L.hi = hi; L.colors.forEach(function (c) { c[0] = lo + c[4] * (hi - lo); });
+          EJ.MAPS[id].ticks = ticks(L, false, '');
+        };
+        customs.push({ id: id, map: id, name: 'Custom: ' + name, blurb: '' });
+        $('legendMin').value = 0; $('legendMax').value = 1;
+        startTrack(tracks().length - 1);
+        announce('Read ' + L.colors.length + (L.discrete ? ' steps' : ' colors') + ' from ' + f.name + '. Set what its lowest and highest values mean.');
+      } catch (err) { announce('Could not read that legend: ' + err.message); }
+    };
+    img.onerror = function () { announce('Could not open that image file.'); };
+    img.src = url;
+  };
+  function applyRange() {
+    var p = tracks()[cur], lo = parseFloat($('legendMin').value), hi = parseFloat($('legendMax').value);
+    if (!p || !ranges[p.id] || isNaN(lo) || isNaN(hi) || hi <= lo) return;
+    ranges[p.id](lo, hi); applyMap(p);
+  }
+  $('legendMin').onchange = $('legendMax').onchange = applyRange;
+
+  // ---------- Map and track ----------
+  function applyMap(p) {
+    EJ.dataType = p.map;
+    var m = EJ.map();
+    $('appTitle').textContent = m.name;
+    $('lh').textContent = m.labels[0]; $('lw').textContent = m.labels[1]; $('avgLabel').textContent = m.avg;
+    $('legendBar').style.background = EJ.legendCss(m.legend);
+    $('legendTicks').innerHTML = m.ticks.map(function (s) { return '<span>' + s + '</span>'; }).join('');
+    $('legendRange').hidden = !ranges[p.id];
+    updateGraphColors();
+    EJ.audio.applyVoice();
+  }
+  function setSpeed(sec) { $('speed').value = 46 - sec; $('spO').textContent = sec + ' s'; t0 = performance.now(); }
+  function startTrack(i) { // switch to track i: map, sweep time, and its video if it has one
+    var T = tracks(); if (!T.length) return;
+    cur = (i + T.length) % T.length;
+    var p = T[cur]; applyMap(p); setSpeed(p.sweep || 24);
+    if (!p.video) return;
+    fetch(p.video).then(function (r) { if (!r.ok) throw new Error(r.status + ' ' + r.statusText); return r.blob(); })
+      .then(function (b) { loadFile(new File([b], p.video.split('/').pop(), { type: b.type || 'video/mp4' })); t0 = performance.now(); })
+      .catch(function (err) { announce('Could not load ' + p.video + ' (' + err.message + '). Serve this folder with: python3 -m http.server'); });
+  }
+  $('speed').oninput = function () { $('spO').textContent = (46 - parseFloat(this.value)) + ' s'; t0 = performance.now(); };
+  $('vol').oninput = function () { EJ.audio.setVolume(parseFloat(this.value)); };
+  function trackStep(d) { startTrack(cur + d); announce(tracks()[cur].name + '. Track ' + (cur + 1) + ' of ' + tracks().length + '.'); }
+  $('tPrev').onclick = function () { trackStep(-1); };
+  $('tNext').onclick = function () { trackStep(1); };
+
+  function setPlaying(on) {
+    var b = $('play');
+    if (on) { t0 = performance.now(); EJ.audio.start(parseFloat($('vol').value)); }
+    else EJ.audio.stop();
+    b.textContent = on ? 'Stop' : 'Play'; b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  $('play').onclick = function () { setPlaying(!EJ.audio.playing); };
+  function describeNow() { var s = $('sr'); s.textContent = ''; setTimeout(function () { s.textContent = describe(); }, 50); }
+  $('describe').onclick = describeNow;
+
+  // ---------- Playlist screen ----------
+  function renderMenu() {
+    var T = tracks(), p = T[cur];
+    $('prev').hidden = $('next').hidden = T.length < 2;
+    $('start').disabled = !p;
+    if (!p) { $('pTitle').textContent = 'Loading'; $('pDesc').textContent = ''; $('pIdx').textContent = ''; return; }
+    var m = EJ.MAPS[p.map];
+    $('pTitle').textContent = p.name;
+    $('pBar').style.background = EJ.legendCss(m.legend);
+    $('pTicks').innerHTML = m.ticks.map(function (s) { return '<span>' + s + '</span>'; }).join('');
+    $('pDesc').textContent = p.blurb || m.blurb;
+    $('pIdx').textContent = 'Track ' + (cur + 1) + ' of ' + T.length;
+    $('pNote').textContent = EJ.presetErrors.length ? 'Some tracks did not load: ' + EJ.presetErrors.join('; ') : '';
+  }
+  function menuGo(d) {
+    var n = tracks().length; if (!n) return;
+    var top = $('top'); top.classList.add('swap');
+    setTimeout(function () { cur = (cur + d + n) % n; renderMenu(); top.classList.remove('swap'); announce($('pTitle').textContent + '. ' + $('pIdx').textContent + '.'); }, 140);
+  }
+  function menuJump(i) { var n = tracks().length; if (i >= 0 && i < n && i !== cur) menuGo(i - cur); }
+  $('prev').onclick = function () { menuGo(-1); };
+  $('next').onclick = function () { menuGo(1); };
+  ['prev', 'next'].forEach(function (id) { $(id).addEventListener('mousedown', function (e) { e.preventDefault(); }); });
+
+  // ---------- Moving between screens ----------
+  function leaveHome() { screen('menu'); $('start').focus(); announce($('pTitle').textContent + '. Press Enter to play. Use the left and right arrow keys to change track.'); }
+  function goHome() { if (EJ.audio.playing) setPlaying(false); screen('home'); $('homeStart').focus(); announce('Earth Jukebox. NASA Earth data, played as sound. Press Enter to start.'); }
+  function enterPlayer() { // the click or key press is the user gesture browsers need before audio can start
+    if (!tracks().length) return;
+    screen('play'); startTrack(cur);
+    if (!EJ.audio.playing) setPlaying(true);
+    if (!looping) { looping = true; requestAnimationFrame(frame); }
+    $('play').focus(); announce('Playing ' + tracks()[cur].name + '. Press Space to stop, Escape to go back.');
+  }
+  function leavePlayer() { if (EJ.audio.playing) setPlaying(false); screen('menu'); renderMenu(); $('start').focus(); announce('Playlist. ' + $('pTitle').textContent + '.'); }
+  $('homeStart').onclick = leaveHome;
+  $('start').onclick = enterPlayer;
+  $('exitMenu').onclick = goHome;
+  $('back').onclick = leavePlayer;
+
+  // ---------- About and Setting sheets ----------
+  function openDlg(d) {
+    var o = d === about ? sets : about;
+    if (o.open) o.close();
+    if (!d.open) { lastF = document.activeElement; d.showModal(); }
+  }
+  [about, sets].forEach(function (d) {
+    d.addEventListener('close', function () { if (lastF && document.contains(lastF)) lastF.focus(); });
+    d.addEventListener('click', function (e) { if (e.target === d) d.close(); }); // click the dimmed area to close
+  });
+  document.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', function () { b.closest('dialog').close(); }); });
+  $('aboutBtn').onclick = function () { openDlg(about); };
+  $('helpBtn').onclick = function () { openDlg(sets); };
+
+  // Text size: scales the whole page (all sizes are in rem) and is remembered
+  var SIZES = [['Normal', 100], ['Large', 115], ['Extra large', 130], ['Largest', 150]], si = 0;
+  var radios = [].slice.call(document.querySelectorAll('#sizes [role=radio]'));
+  function applySize(i, quiet) {
+    si = i; document.documentElement.style.setProperty('--fs', SIZES[i][1] + '%');
+    radios.forEach(function (b, j) { b.setAttribute('aria-checked', j === i); b.tabIndex = j === i ? 0 : -1; });
+    try { localStorage.setItem('ejSize', i); } catch (e) {}
+    if (!quiet) announce('Text size: ' + SIZES[i][0] + '.');
+  }
+  radios.forEach(function (b, j) { b.onclick = function () { applySize(j); }; });
+  function moveSize(d) { var j = (si + d + SIZES.length) % SIZES.length; applySize(j); radios[j].focus(); }
+  try { applySize(Math.max(0, Math.min(3, +localStorage.getItem('ejSize') || 0)), true); } catch (e) { applySize(0, true); }
+
+  // Keyboard shortcut pages (they match the keys wired below)
+  function K() { return [].slice.call(arguments).map(function (k) { return '<kbd>' + k + '</kbd>'; }).join(' '); }
+  var PAGES = [
+    ['Playlist', [[K('&larr;', '&rarr;'), 'Previous or next track'], [K('1') + ' to ' + K('9'), 'Jump to a track'],
+      [K('Enter') + ' or ' + K('Space'), 'Play the track'], [K('A'), 'About'], [K('?'), 'Setting and shortcuts'],
+      [K('T'), 'Change text size'], [K('Esc'), 'Back one screen']]],
+    ['Player', [[K('Space') + ' or ' + K('P'), 'Play or stop'], [K('S'), 'Stop the sound'], [K('R'), 'Restart the sweep from the west'],
+      [K('&larr;', '&rarr;'), 'Previous or next track'], [K('1') + ' to ' + K('9'), 'Jump to a track'],
+      [K('D'), 'Describe this moment'], [K('Esc'), 'Back to the playlist']]],
+    ['Player, sound and media', [[K('[') + ' ' + K(']'), 'Slower or faster sweep'], [K('-') + ' ' + K('='), 'Volume down or up'],
+      [K(',') + ' ' + K('.'), 'Video back or forward 5 seconds'], [K('O'), 'Load an image or video'], [K('L'), 'Upload a legend'],
+      [K('T'), 'Change text size'], [K('?'), 'Open or close this list']]]
+  ], kp = 0;
+  function drawKeys() {
+    var p = PAGES[kp], tb = $('kRows');
+    $('kTitle').textContent = p[0]; tb.textContent = '';
+    p[1].forEach(function (r) {
+      var tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td');
+      a.innerHTML = r[0]; b.textContent = r[1]; tr.appendChild(a); tr.appendChild(b); tb.appendChild(tr);
+    });
+    $('kPage').textContent = (kp + 1) + ' of ' + PAGES.length;
+    $('kBack').disabled = kp === 0; $('kNext').disabled = kp === PAGES.length - 1;
+  }
+  $('kBack').onclick = function () { if (kp > 0) { kp--; drawKeys(); } };
+  $('kNext').onclick = function () { if (kp < PAGES.length - 1) { kp++; drawKeys(); } };
+  drawKeys();
+
+  // ---------- Keyboard ----------
+  function nudgeSpeed(d) { // d > 0 = faster = shorter sweep. The slider holds 46 minus the sweep time.
+    var s = $('speed'), v = Math.max(+s.min, Math.min(+s.max, +s.value + d));
+    if (v === +s.value) { announce(d > 0 ? 'Already at the fastest sweep.' : 'Already at the slowest sweep.'); return; }
+    s.value = v; s.dispatchEvent(new Event('input')); announce('Sweep time ' + (46 - v) + ' seconds per pass.');
+  }
+  function nudgeVolume(d) {
+    var v = $('vol'); v.value = Math.max(0, Math.min(1, +v.value + d)); v.dispatchEvent(new Event('input'));
+    announce('Volume ' + Math.round(v.value * 100) + ' percent.');
+  }
+  function seek(d) {
+    if (!src || src.kind !== 'video') { announce('No video loaded.'); return; }
+    var el = src.el, t = Math.max(0, el.currentTime + d); if (el.duration) t = Math.min(el.duration, t);
+    el.currentTime = t; announce('Video at ' + Math.round(t) + ' seconds.');
+  }
+  document.addEventListener('keydown', function (e) {
+    var k = e.key, tg = e.target, tag = tg.tagName;
+    if (about.open || sets.open) { // a sheet owns the keyboard while it is open (Esc closes it natively)
+      if (k === '?') { e.preventDefault(); (about.open ? about : sets).close(); }
+      else if (sets.open && (k === 'ArrowLeft' || k === 'ArrowRight') && tg.getAttribute('role') === 'radio') { e.preventDefault(); moveSize(k === 'ArrowRight' ? 1 : -1); }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var isRange = tag === 'INPUT' && tg.type === 'range';
+    if (tag === 'SELECT' || tag === 'TEXTAREA' || (tag === 'INPUT' && !isRange && tg.type !== 'file')) return; // typing
+    var lk = k.toLowerCase(), scr = screenName(), onBtn = tag === 'BUTTON' || tag === 'A';
+    if (k === '?') { e.preventDefault(); openDlg(sets); return; }
+    if (lk === 'a') { e.preventDefault(); openDlg(about); return; }
+    if (lk === 't') { applySize((si + 1) % SIZES.length); return; }
+
+    if (scr === 'home') { // landing: only Start is live
+      if ((k === 'Enter' || k === ' ') && !onBtn) { e.preventDefault(); leaveHome(); }
+      return;
+    }
+    var n = parseInt(k, 10);
+    if (scr === 'menu') {
+      if (k === 'Escape') goHome();
+      else if (k === 'ArrowLeft') { e.preventDefault(); menuGo(-1); }
+      else if (k === 'ArrowRight') { e.preventDefault(); menuGo(1); }
+      else if (n >= 1 && n <= 9) menuJump(n - 1);
+      else if ((k === 'Enter' || k === ' ') && !onBtn) { e.preventDefault(); enterPlayer(); }
+      return;
+    }
+    // player
+    if (k === 'Escape') { leavePlayer(); return; }
+    if (isRange && /^(Arrow|Home$|End$|Page)/.test(k)) return; // sliders keep their own arrow keys
+    if (k === 'ArrowLeft') { e.preventDefault(); trackStep(-1); }
+    else if (k === 'ArrowRight') { e.preventDefault(); trackStep(1); }
+    else if (n >= 1 && n <= 9) { if (n - 1 < tracks().length && n - 1 !== cur) { startTrack(n - 1); announce(tracks()[cur].name + '. Track ' + (cur + 1) + ' of ' + tracks().length + '.'); } }
+    else if (lk === 'p' || (k === ' ' && !onBtn)) { e.preventDefault(); $('play').click(); announce(EJ.audio.playing ? 'Playing.' : 'Stopped.'); }
+    else if (lk === 's') { if (EJ.audio.playing) { $('play').click(); announce('Stopped.'); } else announce('Already silent.'); }
+    else if (lk === 'r') { t0 = performance.now(); announce('Back at the west edge.'); }
+    else if (lk === 'd') describeNow();
+    else if (k === '[') nudgeSpeed(-2);
+    else if (k === ']') nudgeSpeed(2);
+    else if (k === '-') nudgeVolume(-0.1);
+    else if (k === '=' || k === '+') nudgeVolume(0.1);
+    else if (k === ',') seek(-5);
+    else if (k === '.') seek(5);
+    else if (lk === 'o') { e.preventDefault(); $('pick').click(); }
+    else if (lk === 'l') { e.preventDefault(); $('legendPick').click(); }
+  });
+
+  // ---------- Legend pictures of presets are read first, then the playlist is complete ----------
+  EJ.presetErrors = [];
+  (EJ.PRESETS || []).forEach(function (p) {
+    if (!p.legend) { p.map = p.map || p.id; return; }
+    p.map = p.id;
+    var img = new Image();
+    img.onload = function () {
+      try { registerMap(p, readLegend(img, p.legend)); } catch (e) { EJ.presetErrors.push(p.id + ': ' + e.message); console.error(p.id, e); }
+      renderMenu();
+    };
+    img.onerror = function () { EJ.presetErrors.push(p.id + ': could not load ' + p.legend.image); renderMenu(); };
+    img.src = p.legend.image;
+  });
+  renderMenu();
+  $('homeStart').focus();
+  announce('Earth Jukebox. NASA Earth data, played as sound. Press Enter to start.');
 })();
