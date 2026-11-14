@@ -1,5 +1,5 @@
 # build_single_file.py — combines index.html + style.css + js/*.js into ONE self-contained page
-# (../earth-jukebox.html) so it can be hosted or opened anywhere. Run:  python3 build_single_file.py
+# (earth-jukebox.html) so it can be hosted or opened anywhere. Run:  python3 build_single_file.py
 import re
 html = open('index.html', encoding='utf-8').read()
 css = open('style.css', encoding='utf-8').read()
@@ -19,5 +19,5 @@ def inline(mo):
     assert '</script' not in js
     return '<script>\n' + js + '\n</script>'
 html = re.sub(r'<script src="(js/[^"]+)"></script>', inline, html)
-open('../earth-jukebox.html', 'w', encoding='utf-8').write(html)
-print('built ../earth-jukebox.html', len(html), 'bytes')
+open('earth-jukebox.html', 'w', encoding='utf-8').write(html)
+print('built earth-jukebox.html', len(html), 'bytes')
